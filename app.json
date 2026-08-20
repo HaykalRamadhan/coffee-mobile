@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "KopiPow",
+    "slug": "kopipow",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F6F1E7",
+    "android": {
+      "package": "com.kopipow.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#F36B35"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.kopipow.app",
+      "supportsTablet": true
+    }
+  }
+}
