@@ -1,12 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import * as NavigationBar from "expo-navigation-bar";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
   Animated,
   AppState,
   Easing,
+  Image,
   Modal,
+  PixelRatio,
   Platform,
   Pressable,
   RefreshControl,
@@ -16,6 +18,7 @@ import {
   TextInput,
   View,
   useWindowDimensions,
+  type ImageSourcePropType,
   type TextProps,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
@@ -37,8 +40,17 @@ const COLORS = {
   white: "#EEEBCB",
 };
 
+const TypographyScaleContext = createContext(1);
+
 function Text({ maxFontSizeMultiplier = 1.2, ...props }: TextProps) {
-  return <NativeText maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} />;
+  const typographyScale = useContext(TypographyScaleContext);
+  const flattenedStyle = StyleSheet.flatten(props.style);
+  const responsiveStyle = flattenedStyle?.fontSize ? {
+    fontSize: flattenedStyle.fontSize * typographyScale,
+    lineHeight: flattenedStyle.lineHeight ? flattenedStyle.lineHeight * typographyScale : undefined,
+  } : undefined;
+
+  return <NativeText maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} style={[props.style, responsiveStyle]} />;
 }
 
 const categories = ["For you", "Coffee", "Non-coffee", "Snacks"];
@@ -88,6 +100,7 @@ type Drink = {
   basePrice: number;
   accent: string;
   coffee: string;
+  imageSource: ImageSourcePropType | null;
   tag: string;
   category: "Coffee" | "Non-coffee" | "Snacks";
 };
@@ -101,6 +114,7 @@ const drinks: Drink[] = [
     basePrice: 42000,
     accent: "#D9B38A",
     coffee: "#704129",
+    imageSource: null,
     tag: "BESTSELLER",
     category: "Coffee",
   },
@@ -112,6 +126,7 @@ const drinks: Drink[] = [
     basePrice: 39000,
     accent: "#EE9851",
     coffee: "#7A3825",
+    imageSource: null,
     tag: "NEW",
     category: "Coffee",
   },
@@ -123,6 +138,7 @@ const drinks: Drink[] = [
     basePrice: 44000,
     accent: "#A9A79C",
     coffee: "#413A35",
+    imageSource: null,
     tag: "SIGNATURE",
     category: "Non-coffee",
   },
@@ -134,6 +150,7 @@ const drinks: Drink[] = [
     basePrice: 45000,
     accent: "#9BAC75",
     coffee: "#66804C",
+    imageSource: null,
     tag: "FRESH",
     category: "Non-coffee",
   },
@@ -145,6 +162,7 @@ const drinks: Drink[] = [
     basePrice: 38000,
     accent: "#B68A6D",
     coffee: "#56382C",
+    imageSource: null,
     tag: "CLASSIC",
     category: "Non-coffee",
   },
@@ -156,6 +174,7 @@ const drinks: Drink[] = [
     basePrice: 32000,
     accent: "#948274",
     coffee: "#33231D",
+    imageSource: null,
     tag: "STRONG",
     category: "Coffee",
   },
@@ -167,6 +186,7 @@ const drinks: Drink[] = [
     basePrice: 35000,
     accent: "#D3A45F",
     coffee: "#8B5D35",
+    imageSource: null,
     tag: "CRISPY",
     category: "Snacks",
   },
@@ -178,39 +198,65 @@ const drinks: Drink[] = [
     basePrice: 34000,
     accent: "#D9B75D",
     coffee: "#7A5330",
+    imageSource: null,
     tag: "BAKED",
     category: "Snacks",
   },
 ];
 
-function Bolt({ small = false }: { small?: boolean }) {
-  return <Text style={[styles.bolt, small && styles.boltSmall]}>ϟ</Text>;
+function Bolt() {
+  return <Text style={styles.bolt}>ϟ</Text>;
 }
 
-function DrinkCup({ color, coffee }: { color: string; coffee: string }) {
+function ProductPhoto({
+  imageSource,
+  name,
+  hero = false,
+}: {
+  imageSource: ImageSourcePropType | null;
+  name: string;
+  hero?: boolean;
+}) {
+  if (imageSource) {
+    return (
+      <Image
+        source={imageSource}
+        style={[styles.productPhoto, hero && styles.productPhotoHero]}
+        resizeMode="cover"
+        accessibilityLabel={`${name} product photo`}
+      />
+    );
+  }
+
   return (
-    <View style={[styles.cupShadow, { backgroundColor: color }]}>
-      <View style={styles.cupLid} />
-      <View style={[styles.coffeeFill, { backgroundColor: coffee }]} />
-      <View style={styles.cupLogo}>
-        <Bolt small />
-        <Text style={styles.cupLogoText}>KP</Text>
+    <View style={[styles.productPhotoPlaceholder, hero && styles.productPhotoPlaceholderHero]}>
+      <View style={styles.productPhotoIcon}>
+        <Ionicons name="camera-outline" size={hero ? 27 : 22} color={COLORS.green} />
       </View>
+      <Text style={styles.productPhotoLabel} numberOfLines={1}>PHOTO SOON</Text>
+      <Text style={styles.productPhotoName} numberOfLines={2}>{name}</Text>
     </View>
   );
 }
 
 export default function App() {
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const useSingleMenuColumn = screenWidth < 340;
   const useThreeMenuColumns = screenWidth >= 700;
+  const screenAspectRatio = Math.max(screenWidth, screenHeight) / Math.min(screenWidth, screenHeight);
+  const isClassicWidePhone = screenAspectRatio < 1.9;
+  const cappedSystemFontScale = Math.min(PixelRatio.getFontScale(), 1.2);
+  const targetFontScale = isClassicWidePhone ? 1.24 : screenWidth >= 400 ? 1.18 : screenWidth < 350 ? 1.08 : 1.12;
+  const typographyScale = Math.max(1, targetFontScale / cappedSystemFontScale);
   const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<"Home" | "Menu" | "Cart" | "Rewards">("Home");
   const [activeCategory, setActiveCategory] = useState("For you");
+  const [searchQuery, setSearchQuery] = useState("");
   const [cart, setCart] = useState<CartState>(EMPTY_CART);
   const [selectedDrink, setSelectedDrink] = useState<Drink | null>(null);
   const [customization, setCustomization] = useState<ProductCustomization>(defaultCustomization);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const splashOpacity = useRef(new Animated.Value(0)).current;
   const splashScale = useRef(new Animated.Value(0.72)).current;
   const chargingProgress = useRef(new Animated.Value(0)).current;
@@ -219,9 +265,38 @@ export default function App() {
   const currentUser = PLACEHOLDER_SESSION.user;
   const cartItemCount = cart.items.reduce((total, item) => total + item.quantity, 0);
   const cartSubtotal = cart.items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
-  const filteredDrinks = activeCategory === "For you"
-    ? drinks
-    : drinks.filter((drink) => drink.category === activeCategory);
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
+  const categorySearch = categories.find(
+    (category) => category !== "For you" && category.toLocaleLowerCase() === normalizedSearchQuery,
+  );
+  const searchMatches = drinks.filter((drink) => {
+    if (!normalizedSearchQuery) return true;
+    if (categorySearch) return drink.category === categorySearch;
+
+    return [drink.name, drink.detail, drink.tag, drink.category]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedSearchQuery));
+  });
+  const filteredDrinks = searchMatches.filter(
+    (drink) => activeCategory === "For you" || drink.category === activeCategory,
+  );
+  const recommendedCategories = normalizedSearchQuery && searchMatches.length > 0
+    ? [
+      "For you",
+      ...categories.filter(
+        (category) => category !== "For you" && searchMatches.some((drink) => drink.category === category),
+      ),
+    ]
+    : categories;
+
+  const updateSearchQuery = (value: string) => {
+    if (!searchQuery.trim() && value.trim()) setActiveCategory("For you");
+    setSearchQuery(value);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setActiveCategory("For you");
+  };
 
   const openCustomizer = (drink: Drink) => {
     setCustomization({ ...defaultCustomization, extras: [] });
@@ -278,11 +353,17 @@ export default function App() {
   };
 
   const refreshContent = () => {
+    if (isRefreshing) return;
+
     setIsRefreshing(true);
 
-    // Replace this short delay with menu, profile, and order API requests later.
+    // This remounts the visible page while keeping local cart and session state.
+    // Replace the delay with Supabase menu, profile, cart, and rewards requests later.
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => setIsRefreshing(false), 800);
+    refreshTimer.current = setTimeout(() => {
+      setRefreshVersion((version) => version + 1);
+      setIsRefreshing(false);
+    }, 650);
   };
 
   const pullToRefresh = (
@@ -391,24 +472,27 @@ export default function App() {
 
   if (showSplash) {
     return (
-      <SafeAreaProvider>
-        <SafeAreaView style={styles.splashSafeArea}>
-          <StatusBar hidden />
-          <Animated.View style={[styles.splashLogo, { opacity: splashOpacity, transform: [{ scale: splashScale }] }]}>
-            <View style={styles.splashLogoMark}><Text style={styles.splashBolt}>ϟ</Text></View>
-            <Text style={styles.splashName}>Kopi POW!</Text>
-            <Text style={styles.splashTagline}>99% REAAAADY TO GOW</Text>
-          </Animated.View>
-        </SafeAreaView>
-      </SafeAreaProvider>
+      <TypographyScaleContext.Provider value={typographyScale}>
+        <SafeAreaProvider>
+          <SafeAreaView style={styles.splashSafeArea}>
+            <StatusBar hidden />
+            <Animated.View style={[styles.splashLogo, { opacity: splashOpacity, transform: [{ scale: splashScale }] }]}>
+              <View style={styles.splashLogoMark}><Text style={styles.splashBolt}>ϟ</Text></View>
+              <Text style={styles.splashName}>Kopi POW!</Text>
+              <Text style={styles.splashTagline}>99% REAAAADY TO GOW</Text>
+            </Animated.View>
+          </SafeAreaView>
+        </SafeAreaProvider>
+      </TypographyScaleContext.Provider>
     );
   }
 
   return (
-    <SafeAreaProvider>
-      <SafeAreaView style={styles.safeArea}>
+    <TypographyScaleContext.Provider value={typographyScale}>
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.safeArea}>
         <StatusBar hidden />
-        {activeTab === "Home" ? <ScrollView key="home-screen" style={styles.screen} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+        {activeTab === "Home" ? <ScrollView key={`home-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -442,7 +526,7 @@ export default function App() {
             </View>
             <View style={styles.heroCupWrap}>
               <View style={styles.heroSun} />
-              <DrinkCup color="#DAB586" coffee="#6C3D27" />
+              <ProductPhoto imageSource={drinks[0].imageSource} name="Iced Power Latte" hero />
             </View>
           </View>
         </View>
@@ -463,7 +547,7 @@ export default function App() {
             <View key={drink.id} style={styles.drinkCard}>
               <View style={[styles.drinkVisual, { backgroundColor: drink.accent }]}>
                 <Text style={styles.drinkTag}>{drink.tag}</Text>
-                <DrinkCup color="#DDBF98" coffee={drink.coffee} />
+                <ProductPhoto imageSource={drink.imageSource} name={drink.name} />
               </View>
               <Text style={styles.drinkName} numberOfLines={2}>{drink.name}</Text>
               <Text style={styles.drinkDetail} numberOfLines={2}>{drink.detail}</Text>
@@ -490,7 +574,7 @@ export default function App() {
           </View>
           <Text style={styles.rewardArrow}>›</Text>
         </View>
-      </ScrollView> : activeTab === "Menu" ? <ScrollView key="menu-screen" style={styles.screen} contentContainerStyle={styles.menuContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      </ScrollView> : activeTab === "Menu" ? <ScrollView key={`menu-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.menuContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -513,12 +597,31 @@ export default function App() {
         </View>
 
         <View style={styles.searchBar}>
-          <Text style={styles.searchIcon}>⌕</Text>
-          <Text style={styles.searchPlaceholder}>Search your next power-up</Text>
+          <Ionicons name="search-outline" size={21} color={COLORS.green} style={styles.searchIcon} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={updateSearchQuery}
+            placeholder="Search drinks, snacks, or ingredients"
+            placeholderTextColor={COLORS.muted}
+            selectionColor={COLORS.orange}
+            returnKeyType="search"
+            autoCorrect={false}
+            maxFontSizeMultiplier={1.2}
+            style={[styles.searchInput, { fontSize: 12.5 * typographyScale }]}
+            accessibilityLabel="Search the KopiPow menu"
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={clearSearch} style={styles.searchClear} accessibilityLabel="Clear menu search">
+              <Ionicons name="close-circle" size={22} color={COLORS.muted} />
+            </Pressable>
+          )}
         </View>
 
+        <Text style={styles.categorySuggestionLabel}>
+          {normalizedSearchQuery && searchMatches.length > 0 ? "MATCHING CATEGORIES" : "RECOMMENDED CATEGORIES"}
+        </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-          {categories.map((category) => {
+          {recommendedCategories.map((category) => {
             const selected = category === activeCategory;
             return (
               <Pressable key={category} onPress={() => setActiveCategory(category)} style={[styles.categoryChip, selected && styles.categoryChipActive]}>
@@ -530,10 +633,13 @@ export default function App() {
 
         <View style={styles.menuSectionRow}>
           <View>
-            <Text style={styles.sectionEyebrow}>{activeCategory === "For you" ? "ALL-DAY POWER" : activeCategory.toUpperCase()}</Text>
-            <Text style={styles.menuSectionTitle} numberOfLines={2}>{activeCategory === "For you" ? "Made for every mood" : `${activeCategory} picks`}</Text>
+            <Text style={styles.sectionEyebrow}>{normalizedSearchQuery ? "SEARCH RESULTS" : activeCategory === "For you" ? "ALL-DAY POWER" : activeCategory.toUpperCase()}</Text>
+            <Text style={styles.menuSectionTitle} numberOfLines={2}>
+              {normalizedSearchQuery
+                ? `${filteredDrinks.length} ${filteredDrinks.length === 1 ? "match" : "matches"} for “${searchQuery.trim()}”`
+                : activeCategory === "For you" ? "Made for every mood" : `${activeCategory} picks`}
+            </Text>
           </View>
-          <Text style={styles.swipeHint}>SCROLL ↓</Text>
         </View>
 
         <View style={styles.menuGrid}>
@@ -541,7 +647,7 @@ export default function App() {
             <View key={drink.id} style={[styles.menuCard, useSingleMenuColumn && styles.menuCardSingleColumn, useThreeMenuColumns && styles.menuCardThreeColumns]}>
               <View style={[styles.menuDrinkVisual, { backgroundColor: drink.accent }]}> 
                 <Text style={styles.menuDrinkTag}>{drink.tag}</Text>
-                <View style={styles.menuCupScale}><DrinkCup color="#DDBF98" coffee={drink.coffee} /></View>
+                <ProductPhoto imageSource={drink.imageSource} name={drink.name} />
               </View>
               <Text style={styles.menuDrinkName} numberOfLines={2}>{drink.name}</Text>
               <Text style={styles.menuDrinkDetail} numberOfLines={2}>{drink.detail}</Text>
@@ -553,8 +659,20 @@ export default function App() {
               </View>
             </View>
           ))}
+          {filteredDrinks.length === 0 && (
+            <View style={styles.emptySearchCard}>
+              <View style={styles.emptySearchIcon}>
+                <Ionicons name="search-outline" size={28} color={COLORS.green} />
+              </View>
+              <Text style={styles.emptySearchTitle}>No power-ups found</Text>
+              <Text style={styles.emptySearchCopy}>Try another name, ingredient, or category.</Text>
+              <Pressable onPress={clearSearch} style={styles.emptySearchButton}>
+                <Text style={styles.emptySearchButtonText}>Show all menu</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
-      </ScrollView> : activeTab === "Rewards" ? <ScrollView key="rewards-screen" style={styles.screen} contentContainerStyle={styles.rewardsPage} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      </ScrollView> : activeTab === "Rewards" ? <ScrollView key={`rewards-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.rewardsPage} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -592,7 +710,7 @@ export default function App() {
           <Text style={styles.comingSoonTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.74}>Something powerful{`\n`}is coming!</Text>
           <Text style={styles.comingSoonCopy}>We&apos;re brewing a rewards experience worth waiting for. Check back soon.</Text>
         </View>
-      </ScrollView> : <ScrollView key="cart-screen" style={styles.screen} contentContainerStyle={styles.cartContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      </ScrollView> : <ScrollView key={`cart-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.cartContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -768,8 +886,9 @@ export default function App() {
             </View>
           </View>
         </Modal>
-      </SafeAreaView>
-    </SafeAreaProvider>
+        </SafeAreaView>
+      </SafeAreaProvider>
+    </TypographyScaleContext.Provider>
   );
 }
 
@@ -831,7 +950,6 @@ const styles = StyleSheet.create({
   logoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoMark: { width: 38, height: 38, borderRadius: 13, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-4deg" }] },
   bolt: { color: COLORS.green, fontSize: 29, fontWeight: "900", lineHeight: 32 },
-  boltSmall: { fontSize: 17, lineHeight: 18 },
   logo: { color: COLORS.ink, fontSize: 23, fontWeight: "900", fontStyle: "italic", letterSpacing: -1.4 },
   logoLine: { color: COLORS.muted, fontSize: 7, fontWeight: "800", letterSpacing: 1.7, marginTop: 1 },
   avatar: { width: 40, height: 40, borderRadius: 15, backgroundColor: COLORS.ink, alignItems: "center", justifyContent: "center", transform: [{ rotate: "3deg" }] },
@@ -849,18 +967,24 @@ const styles = StyleSheet.create({
   menuHeadingRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", paddingTop: 26, marginBottom: 22 },
   menuEyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 6 },
   menuTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 43, lineHeight: 47, letterSpacing: -1.5 },
-  searchBar: { height: 50, borderRadius: 17, backgroundColor: COLORS.white, borderWidth: 1, borderColor: "#DFDAB8", flexDirection: "row", alignItems: "center", paddingHorizontal: 16, marginBottom: 17 },
-  searchIcon: { color: COLORS.green, fontSize: 24, marginRight: 10, marginTop: -3 },
-  searchPlaceholder: { color: COLORS.muted, fontSize: 12, fontWeight: "600" },
+  searchBar: { minHeight: 54, borderRadius: 17, backgroundColor: COLORS.white, borderWidth: 1, borderColor: "#DFDAB8", flexDirection: "row", alignItems: "center", paddingHorizontal: 15, marginBottom: 12 },
+  searchIcon: { marginRight: 10 },
+  searchInput: { flex: 1, minWidth: 0, color: COLORS.ink, fontWeight: "600", paddingVertical: 12 },
+  searchClear: { width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: -8 },
+  categorySuggestionLabel: { color: COLORS.muted, fontSize: 8, fontWeight: "900", letterSpacing: 1.2, marginBottom: 8, marginLeft: 2 },
   menuSectionRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", marginTop: 5, marginBottom: 15 },
   menuSectionTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 24, fontWeight: "900" },
-  swipeHint: { color: COLORS.muted, fontSize: 7, fontWeight: "900", letterSpacing: 1.1, paddingBottom: 3 },
   menuGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 13 },
+  emptySearchCard: { width: "100%", backgroundColor: COLORS.white, borderRadius: 22, paddingHorizontal: 24, paddingVertical: 30, alignItems: "center", borderWidth: 1, borderColor: "#DFDAB8" },
+  emptySearchIcon: { width: 54, height: 54, borderRadius: 18, backgroundColor: "#DCD9B8", alignItems: "center", justifyContent: "center", marginBottom: 13 },
+  emptySearchTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 21, fontWeight: "900", textAlign: "center" },
+  emptySearchCopy: { color: COLORS.muted, fontSize: 9, lineHeight: 14, textAlign: "center", marginTop: 6 },
+  emptySearchButton: { backgroundColor: COLORS.orange, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 11, marginTop: 17 },
+  emptySearchButtonText: { color: COLORS.white, fontSize: 9, fontWeight: "900" },
   menuCard: { width: "48.3%", backgroundColor: COLORS.white, borderRadius: 20, padding: 9 },
   menuCardSingleColumn: { width: "100%" },
   menuCardThreeColumns: { width: "31.7%" },
-  menuDrinkVisual: { height: 145, borderRadius: 14, alignItems: "center", justifyContent: "flex-end", overflow: "hidden" },
-  menuCupScale: { transform: [{ scale: 0.85 }], marginBottom: -10 },
+  menuDrinkVisual: { height: 145, borderRadius: 14, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   menuDrinkTag: { position: "absolute", left: 8, top: 8, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 10, borderWidth: 1.5, borderColor: COLORS.green, paddingHorizontal: 8, paddingVertical: 5, fontSize: 7.5, fontWeight: "900", letterSpacing: 0.5, zIndex: 5, elevation: 4 },
   menuDrinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 16, lineHeight: 19, fontWeight: "900", minHeight: 40, marginTop: 10 },
   menuDrinkDetail: { color: COLORS.muted, fontSize: 7.5, lineHeight: 11, minHeight: 28, marginTop: 4 },
@@ -876,17 +1000,19 @@ const styles = StyleSheet.create({
   quickOrderArrow: { color: COLORS.white, marginLeft: 11, fontWeight: "900" },
   heroCupWrap: { flex: 1, alignItems: "center", justifyContent: "flex-end", position: "relative" },
   heroSun: { position: "absolute", top: 28, width: 130, height: 130, borderRadius: 65, backgroundColor: COLORS.yellow },
-  cupShadow: { width: 85, height: 137, borderRadius: 10, borderBottomLeftRadius: 27, borderBottomRightRadius: 27, overflow: "hidden", justifyContent: "flex-end", alignItems: "center", marginBottom: -7, shadowColor: "#000", shadowOpacity: 0.2, shadowOffset: { width: 9, height: 10 }, shadowRadius: 10, elevation: 7 },
-  cupLid: { position: "absolute", zIndex: 3, top: 0, width: 92, height: 18, borderRadius: 7, backgroundColor: "#EAE4D8", borderBottomWidth: 4, borderColor: "#CBC3B6" },
-  coffeeFill: { position: "absolute", top: 17, left: 0, right: 0, height: 72 },
-  cupLogo: { zIndex: 4, width: 45, height: 45, borderRadius: 23, borderWidth: 1.5, borderColor: COLORS.white, alignItems: "center", justifyContent: "center", marginBottom: 30 },
-  cupLogoText: { color: COLORS.white, fontSize: 8, fontWeight: "900", marginTop: -4 },
+  productPhoto: { width: "100%", height: "100%", borderRadius: 14 },
+  productPhotoHero: { width: "88%", height: "78%", marginBottom: 0, borderRadius: 18 },
+  productPhotoPlaceholder: { width: "78%", height: "68%", borderRadius: 15, borderWidth: 1.5, borderStyle: "dashed", borderColor: COLORS.green, backgroundColor: "rgba(238, 235, 203, 0.88)", alignItems: "center", justifyContent: "center", paddingHorizontal: 8, zIndex: 2 },
+  productPhotoPlaceholderHero: { width: "86%", height: "70%", marginBottom: 0, borderColor: "#D7D5B3", backgroundColor: "rgba(238, 235, 203, 0.94)" },
+  productPhotoIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: "#D6D3B1", alignItems: "center", justifyContent: "center", marginBottom: 7 },
+  productPhotoLabel: { color: COLORS.orange, fontSize: 7, fontWeight: "900", letterSpacing: 1.1, textAlign: "center" },
+  productPhotoName: { color: COLORS.ink, fontSize: 8.5, lineHeight: 11, fontWeight: "800", textAlign: "center", marginTop: 3 },
   sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 },
   sectionEyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 5 },
   sectionTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 25, fontWeight: "900" },
   drinkRow: { gap: 13, paddingBottom: 28 },
   drinkCard: { width: 174, backgroundColor: COLORS.white, borderRadius: 20, padding: 10 },
-  drinkVisual: { height: 153, borderRadius: 14, alignItems: "center", justifyContent: "flex-end", overflow: "hidden" },
+  drinkVisual: { height: 153, borderRadius: 14, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   drinkTag: { position: "absolute", left: 10, top: 10, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 12, borderWidth: 2, borderColor: COLORS.green, paddingHorizontal: 11, paddingVertical: 7, fontSize: 9.5, fontWeight: "900", letterSpacing: 0.8, zIndex: 5, shadowColor: "#000", shadowOpacity: 0.2, shadowOffset: { width: 0, height: 3 }, shadowRadius: 4, elevation: 5 },
   drinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 17, lineHeight: 20, fontWeight: "900", minHeight: 40, marginTop: 12 },
   drinkDetail: { color: COLORS.muted, fontSize: 8, lineHeight: 12, minHeight: 24, marginTop: 5 },
