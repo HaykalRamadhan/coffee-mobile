@@ -4,10 +4,12 @@ import * as NavigationBar from "expo-navigation-bar";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Easing,
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -199,9 +201,12 @@ export default function App() {
   const [cart, setCart] = useState<CartState>(EMPTY_CART);
   const [selectedDrink, setSelectedDrink] = useState<Drink | null>(null);
   const [customization, setCustomization] = useState<ProductCustomization>(defaultCustomization);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const splashOpacity = useRef(new Animated.Value(0)).current;
   const splashScale = useRef(new Animated.Value(0.72)).current;
   const chargingProgress = useRef(new Animated.Value(0)).current;
+  const navigationHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentUser = PLACEHOLDER_SESSION.user;
   const cartItemCount = cart.items.reduce((total, item) => total + item.quantity, 0);
   const cartSubtotal = cart.items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
@@ -263,14 +268,55 @@ export default function App() {
     }));
   };
 
+  const refreshContent = () => {
+    setIsRefreshing(true);
+
+    // Replace this short delay with menu, profile, and order API requests later.
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => setIsRefreshing(false), 800);
+  };
+
+  const pullToRefresh = (
+    <RefreshControl
+      refreshing={isRefreshing}
+      onRefresh={refreshContent}
+      colors={[COLORS.green]}
+      progressBackgroundColor={COLORS.white}
+      tintColor={COLORS.green}
+    />
+  );
+
   useEffect(() => {
     if (Platform.OS !== "android") return;
 
-    const enterImmersiveMode = async () => {
-      await NavigationBar.setVisibilityAsync("hidden");
+    const hideNavigationBar = () => {
+      void NavigationBar.setVisibilityAsync("hidden");
     };
 
-    void enterImmersiveMode();
+    const scheduleNavigationBarHide = (delay = 250) => {
+      if (navigationHideTimer.current) clearTimeout(navigationHideTimer.current);
+      navigationHideTimer.current = setTimeout(hideNavigationBar, delay);
+    };
+
+    hideNavigationBar();
+
+    const visibilitySubscription = NavigationBar.addVisibilityListener(({ visibility }) => {
+      if (visibility === "visible") scheduleNavigationBarHide();
+    });
+
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") scheduleNavigationBarHide(100);
+    });
+
+    return () => {
+      visibilitySubscription.remove();
+      appStateSubscription.remove();
+      if (navigationHideTimer.current) clearTimeout(navigationHideTimer.current);
+    };
+  }, []);
+
+  useEffect(() => () => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
   }, []);
 
   useEffect(() => {
@@ -353,7 +399,7 @@ export default function App() {
     <SafeAreaProvider>
       <SafeAreaView style={styles.safeArea}>
         <StatusBar hidden />
-        {activeTab === "Home" ? <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {activeTab === "Home" ? <ScrollView key="home-screen" style={styles.screen} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -374,19 +420,21 @@ export default function App() {
           <View style={styles.headlineBolt}><Bolt /></View>
         </View>
 
-        <View style={styles.powerCard}>
-          <View style={styles.powerCardCopy}>
-            <Text style={styles.powerKicker}>TODAY&apos;S POWER-UP</Text>
-            <Text style={styles.powerTitle}>Iced Power Latte!</Text>
-            <Text style={styles.powerDetail}>Oat milk · less sweet · double shot</Text>
-            <Pressable style={styles.quickOrder} onPress={() => openCustomizer(drinks[0])}>
-              <Text style={styles.quickOrderText}>Order today&apos;s pick</Text>
-              <Text style={styles.quickOrderArrow}>→</Text>
-            </Pressable>
-          </View>
-          <View style={styles.heroCupWrap}>
-            <View style={styles.heroSun} />
-            <DrinkCup color="#DAB586" coffee="#6C3D27" />
+        <View style={styles.powerCardShadow}>
+          <View style={styles.powerCard} collapsable={false}>
+            <View style={styles.powerCardCopy}>
+              <Text style={styles.powerKicker}>TODAY&apos;S POWER-UP</Text>
+              <Text style={styles.powerTitle}>Iced Power Latte!</Text>
+              <Text style={styles.powerDetail}>Oat milk · less sweet · double shot</Text>
+              <Pressable style={styles.quickOrder} onPress={() => openCustomizer(drinks[0])}>
+                <Text style={styles.quickOrderText}>Order today&apos;s pick</Text>
+                <Text style={styles.quickOrderArrow}>→</Text>
+              </Pressable>
+            </View>
+            <View style={styles.heroCupWrap}>
+              <View style={styles.heroSun} />
+              <DrinkCup color="#DAB586" coffee="#6C3D27" />
+            </View>
           </View>
         </View>
 
@@ -433,13 +481,13 @@ export default function App() {
           </View>
           <Text style={styles.rewardArrow}>›</Text>
         </View>
-      </ScrollView> : activeTab === "Menu" ? <ScrollView style={styles.screen} contentContainerStyle={styles.menuContent} showsVerticalScrollIndicator={false}>
+      </ScrollView> : activeTab === "Menu" ? <ScrollView key="menu-screen" style={styles.screen} contentContainerStyle={styles.menuContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
             <View>
               <Text style={styles.logo}>Kopi POW!</Text>
-              <Text style={styles.logoLine}>99% REAAAADY TO GO</Text>
+              <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
           <Pressable style={styles.avatar} accessibilityLabel="Open profile">
@@ -497,7 +545,7 @@ export default function App() {
             </View>
           ))}
         </View>
-      </ScrollView> : activeTab === "Rewards" ? <View style={styles.rewardsPage}>
+      </ScrollView> : activeTab === "Rewards" ? <ScrollView key="rewards-screen" style={styles.screen} contentContainerStyle={styles.rewardsPage} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -535,7 +583,7 @@ export default function App() {
           <Text style={styles.comingSoonTitle}>Something powerful{`\n`}is coming!</Text>
           <Text style={styles.comingSoonCopy}>We&apos;re brewing a rewards experience worth waiting for. Check back soon.</Text>
         </View>
-      </View> : <ScrollView style={styles.screen} contentContainerStyle={styles.cartContent} showsVerticalScrollIndicator={false}>
+      </ScrollView> : <ScrollView key="cart-screen" style={styles.screen} contentContainerStyle={styles.cartContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -713,7 +761,7 @@ const styles = StyleSheet.create({
   splashTagline: { color: COLORS.muted, fontSize: 9, fontWeight: "900", letterSpacing: 2.3, marginTop: 7 },
   safeArea: { flex: 1, backgroundColor: COLORS.cream },
   screen: { flex: 1, backgroundColor: COLORS.cream },
-  rewardsPage: { flex: 1, backgroundColor: COLORS.cream, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 108 },
+  rewardsPage: { flexGrow: 1, backgroundColor: COLORS.cream, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 108 },
   comingSoonContent: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingBottom: 20 },
   comingSoonBurst: { width: 142, height: 142, borderRadius: 48, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginBottom: 32 },
   comingSoonIcon: { color: COLORS.green, fontSize: 88, fontWeight: "900", lineHeight: 96, textAlign: "center" },
@@ -758,14 +806,14 @@ const styles = StyleSheet.create({
   summaryNote: { color: "#AEBBB1", fontSize: 8, lineHeight: 12, marginTop: 6 },
   checkoutLaterButton: { backgroundColor: "#9C9B86", borderRadius: 22, alignItems: "center", paddingVertical: 15, marginTop: 14 },
   checkoutLaterText: { color: COLORS.white, fontSize: 10, fontWeight: "900", letterSpacing: 1.1 },
-  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 22 },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#BBB99A", borderRadius: 19, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 22 },
   logoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoMark: { width: 38, height: 38, borderRadius: 13, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-4deg" }] },
   bolt: { color: COLORS.green, fontSize: 29, fontWeight: "900", lineHeight: 32 },
   boltSmall: { fontSize: 17, lineHeight: 18 },
   logo: { color: COLORS.ink, fontSize: 23, fontWeight: "900", fontStyle: "italic", letterSpacing: -1.4 },
   logoLine: { color: COLORS.muted, fontSize: 7, fontWeight: "800", letterSpacing: 1.7, marginTop: 1 },
-  avatar: { width: 40, height: 40, borderRadius: 15, backgroundColor: COLORS.green, alignItems: "center", justifyContent: "center", transform: [{ rotate: "3deg" }] },
+  avatar: { width: 40, height: 40, borderRadius: 15, backgroundColor: COLORS.ink, alignItems: "center", justifyContent: "center", transform: [{ rotate: "3deg" }] },
   avatarText: { color: COLORS.white, fontSize: 15, fontWeight: "800" },
   onlineDot: { position: "absolute", right: -1, bottom: 1, width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.yellow, borderWidth: 2, borderColor: COLORS.cream },
   greetingBlock: { paddingTop: 34, paddingBottom: 24, position: "relative" },
@@ -794,7 +842,8 @@ const styles = StyleSheet.create({
   menuDrinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 16, fontWeight: "900", marginTop: 10 },
   menuDrinkDetail: { color: COLORS.muted, fontSize: 7.5, lineHeight: 11, minHeight: 22, marginTop: 4 },
   menuDrinkPrice: { color: COLORS.ink, fontSize: 11, fontWeight: "900" },
-  powerCard: { minHeight: 208, borderRadius: 26, backgroundColor: COLORS.green, overflow: "hidden", flexDirection: "row", marginBottom: 34 },
+  powerCardShadow: { borderRadius: 26, marginBottom: 34, shadowColor: "#071B14", shadowOpacity: 0.42, shadowOffset: { width: 0, height: 12 }, shadowRadius: 16, elevation: 12 },
+  powerCard: { minHeight: 208, borderRadius: 26, backgroundColor: COLORS.ink, overflow: "hidden", flexDirection: "row" },
   powerCardCopy: { width: "60%", padding: 21, zIndex: 2 },
   powerKicker: { color: "#D9E0D4", fontSize: 7, fontWeight: "800", letterSpacing: 1.35, marginBottom: 11 },
   powerTitle: { color: COLORS.yellow, fontFamily: "serif", fontStyle: "italic", fontSize: 25, fontWeight: "900" },

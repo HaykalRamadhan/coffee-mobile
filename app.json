@@ -6,6 +6,11 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "backgroundColor": "#F6F1E7",
+    "androidNavigationBar": {
+      "visible": "immersive",
+      "barStyle": "dark-content",
+      "backgroundColor": "#EEEBCB"
+    },
     "android": {
       "package": "com.kopipow.app",
       "adaptiveIcon": {
