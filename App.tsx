@@ -12,9 +12,11 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
+  Text as NativeText,
   TextInput,
   View,
+  useWindowDimensions,
+  type TextProps,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -34,6 +36,10 @@ const COLORS = {
   muted: "#526659",
   white: "#EEEBCB",
 };
+
+function Text({ maxFontSizeMultiplier = 1.2, ...props }: TextProps) {
+  return <NativeText maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} />;
+}
 
 const categories = ["For you", "Coffee", "Non-coffee", "Snacks"];
 const sizeOptions: ProductCustomization["size"][] = ["Small", "Regular", "Large"];
@@ -195,6 +201,9 @@ function DrinkCup({ color, coffee }: { color: string; coffee: string }) {
 }
 
 export default function App() {
+  const { width: screenWidth } = useWindowDimensions();
+  const useSingleMenuColumn = screenWidth < 340;
+  const useThreeMenuColumns = screenWidth >= 700;
   const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<"Home" | "Menu" | "Cart" | "Rewards">("Home");
   const [activeCategory, setActiveCategory] = useState("For you");
@@ -404,7 +413,7 @@ export default function App() {
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
             <View>
-              <Text style={styles.logo}>Kopi POW!</Text>
+              <Text style={styles.logo} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.86}>Kopi POW!</Text>
               <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
@@ -416,7 +425,7 @@ export default function App() {
 
         <View style={styles.greetingBlock}>
           <Text style={styles.greeting}>Good morning, {currentUser.displayName}.</Text>
-          <Text style={styles.headline}>Ready to power{`\n`}your way?</Text>
+          <Text style={styles.headline} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78}>Ready to power{`\n`}your way?</Text>
           <View style={styles.headlineBolt}><Bolt /></View>
         </View>
 
@@ -424,7 +433,7 @@ export default function App() {
           <View style={styles.powerCard} collapsable={false}>
             <View style={styles.powerCardCopy}>
               <Text style={styles.powerKicker}>TODAY&apos;S POWER-UP</Text>
-              <Text style={styles.powerTitle}>Iced Power Latte!</Text>
+              <Text style={styles.powerTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78}>Iced Power Latte!</Text>
               <Text style={styles.powerDetail}>Oat milk · less sweet · double shot</Text>
               <Pressable style={styles.quickOrder} onPress={() => openCustomizer(drinks[0])}>
                 <Text style={styles.quickOrderText}>Order today&apos;s pick</Text>
@@ -441,7 +450,7 @@ export default function App() {
         <View style={styles.sectionTitleRow}>
           <View>
             <Text style={styles.sectionEyebrow}>TAKE A SMALL SIP</Text>
-            <Text style={styles.sectionTitle}>Popular right now</Text>
+            <Text style={styles.sectionTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Popular right now</Text>
           </View>
         </View>
 
@@ -456,8 +465,8 @@ export default function App() {
                 <Text style={styles.drinkTag}>{drink.tag}</Text>
                 <DrinkCup color="#DDBF98" coffee={drink.coffee} />
               </View>
-              <Text style={styles.drinkName}>{drink.name}</Text>
-              <Text style={styles.drinkDetail}>{drink.detail}</Text>
+              <Text style={styles.drinkName} numberOfLines={2}>{drink.name}</Text>
+              <Text style={styles.drinkDetail} numberOfLines={2}>{drink.detail}</Text>
               <View style={styles.drinkBottom}>
                 <Text style={styles.drinkPrice}>{drink.price}</Text>
                 <Pressable
@@ -486,7 +495,7 @@ export default function App() {
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
             <View>
-              <Text style={styles.logo}>Kopi POW!</Text>
+              <Text style={styles.logo} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.86}>Kopi POW!</Text>
               <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
@@ -522,20 +531,20 @@ export default function App() {
         <View style={styles.menuSectionRow}>
           <View>
             <Text style={styles.sectionEyebrow}>{activeCategory === "For you" ? "ALL-DAY POWER" : activeCategory.toUpperCase()}</Text>
-            <Text style={styles.menuSectionTitle}>{activeCategory === "For you" ? "Made for every mood" : `${activeCategory} picks`}</Text>
+            <Text style={styles.menuSectionTitle} numberOfLines={2}>{activeCategory === "For you" ? "Made for every mood" : `${activeCategory} picks`}</Text>
           </View>
           <Text style={styles.swipeHint}>SCROLL ↓</Text>
         </View>
 
         <View style={styles.menuGrid}>
           {filteredDrinks.map((drink) => (
-            <View key={drink.id} style={styles.menuCard}>
+            <View key={drink.id} style={[styles.menuCard, useSingleMenuColumn && styles.menuCardSingleColumn, useThreeMenuColumns && styles.menuCardThreeColumns]}>
               <View style={[styles.menuDrinkVisual, { backgroundColor: drink.accent }]}> 
                 <Text style={styles.menuDrinkTag}>{drink.tag}</Text>
                 <View style={styles.menuCupScale}><DrinkCup color="#DDBF98" coffee={drink.coffee} /></View>
               </View>
-              <Text style={styles.menuDrinkName}>{drink.name}</Text>
-              <Text style={styles.menuDrinkDetail}>{drink.detail}</Text>
+              <Text style={styles.menuDrinkName} numberOfLines={2}>{drink.name}</Text>
+              <Text style={styles.menuDrinkDetail} numberOfLines={2}>{drink.detail}</Text>
               <View style={styles.drinkBottom}>
                 <Text style={styles.menuDrinkPrice}>{drink.price}</Text>
                 <Pressable style={styles.addButton} accessibilityLabel={`Customize ${drink.name}`} onPress={() => openCustomizer(drink)}>
@@ -550,7 +559,7 @@ export default function App() {
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
             <View>
-              <Text style={styles.logo}>Kopi POW!</Text>
+              <Text style={styles.logo} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.86}>Kopi POW!</Text>
               <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
@@ -580,7 +589,7 @@ export default function App() {
             <Animated.View style={[styles.chargingGlow, { opacity: chargingProgress }]} />
             <Text style={styles.comingSoonEyebrow}>REWARDS ARE CHARGING</Text>
           </Animated.View>
-          <Text style={styles.comingSoonTitle}>Something powerful{`\n`}is coming!</Text>
+          <Text style={styles.comingSoonTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.74}>Something powerful{`\n`}is coming!</Text>
           <Text style={styles.comingSoonCopy}>We&apos;re brewing a rewards experience worth waiting for. Check back soon.</Text>
         </View>
       </ScrollView> : <ScrollView key="cart-screen" style={styles.screen} contentContainerStyle={styles.cartContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
@@ -588,7 +597,7 @@ export default function App() {
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
             <View>
-              <Text style={styles.logo}>Kopi POW!</Text>
+              <Text style={styles.logo} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.86}>Kopi POW!</Text>
               <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
@@ -661,14 +670,26 @@ export default function App() {
       </ScrollView>}
 
         <View style={styles.bottomNav}>
-          <Pressable style={styles.navItem} onPress={() => setActiveTab("Home")}><Text style={activeTab === "Home" ? styles.navIconActive : styles.navIcon}>⌂</Text><Text style={activeTab === "Home" ? styles.navLabelActive : styles.navLabel}>Home</Text></Pressable>
-          <Pressable style={styles.navItem} onPress={() => setActiveTab("Menu")}><Text style={activeTab === "Menu" ? styles.navIconActive : styles.navIcon}>▤</Text><Text style={activeTab === "Menu" ? styles.navLabelActive : styles.navLabel}>Menu</Text></Pressable>
+          <Pressable style={styles.navItem} onPress={() => setActiveTab("Home")}>
+            <Ionicons name={activeTab === "Home" ? "home" : "home-outline"} size={24} color={activeTab === "Home" ? COLORS.orange : "#9B9C95"} />
+            <Text style={activeTab === "Home" ? styles.navLabelActive : styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Home</Text>
+          </Pressable>
+          <Pressable style={styles.navItem} onPress={() => setActiveTab("Menu")}>
+            <Ionicons name={activeTab === "Menu" ? "grid" : "grid-outline"} size={23} color={activeTab === "Menu" ? COLORS.orange : "#9B9C95"} />
+            <Text style={activeTab === "Menu" ? styles.navLabelActive : styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Menu</Text>
+          </Pressable>
           <Pressable style={[styles.cartButton, activeTab === "Cart" && styles.cartButtonActive]} accessibilityLabel={`Cart with ${cartItemCount} items`} onPress={() => setActiveTab("Cart")}>
             <Ionicons name="cart-outline" size={29} color={COLORS.white} />
             {cartItemCount > 0 && <View style={styles.cartBadge}><Text style={styles.cartBadgeText}>{cartItemCount}</Text></View>}
           </Pressable>
-          <Pressable style={styles.navItem} onPress={() => setActiveTab("Rewards")}><Text style={activeTab === "Rewards" ? styles.navIconActive : styles.navIcon}>♡</Text><Text style={activeTab === "Rewards" ? styles.navLabelActive : styles.navLabel}>Rewards</Text></Pressable>
-          <Pressable style={styles.navItem}><Text style={styles.navIcon}>○</Text><Text style={styles.navLabel}>Profile</Text></Pressable>
+          <Pressable style={styles.navItem} onPress={() => setActiveTab("Rewards")}>
+            <Ionicons name={activeTab === "Rewards" ? "heart" : "heart-outline"} size={25} color={activeTab === "Rewards" ? COLORS.orange : "#9B9C95"} />
+            <Text style={activeTab === "Rewards" ? styles.navLabelActive : styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>Rewards</Text>
+          </Pressable>
+          <Pressable style={styles.navItem}>
+            <Ionicons name="person-outline" size={24} color="#9B9C95" />
+            <Text style={styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Profile</Text>
+          </Pressable>
         </View>
 
         <Modal visible={selectedDrink !== null} transparent animationType="slide" onRequestClose={closeCustomizer}>
@@ -836,11 +857,13 @@ const styles = StyleSheet.create({
   swipeHint: { color: COLORS.muted, fontSize: 7, fontWeight: "900", letterSpacing: 1.1, paddingBottom: 3 },
   menuGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 13 },
   menuCard: { width: "48.3%", backgroundColor: COLORS.white, borderRadius: 20, padding: 9 },
+  menuCardSingleColumn: { width: "100%" },
+  menuCardThreeColumns: { width: "31.7%" },
   menuDrinkVisual: { height: 145, borderRadius: 14, alignItems: "center", justifyContent: "flex-end", overflow: "hidden" },
   menuCupScale: { transform: [{ scale: 0.85 }], marginBottom: -10 },
   menuDrinkTag: { position: "absolute", left: 8, top: 8, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 10, borderWidth: 1.5, borderColor: COLORS.green, paddingHorizontal: 8, paddingVertical: 5, fontSize: 7.5, fontWeight: "900", letterSpacing: 0.5, zIndex: 5, elevation: 4 },
-  menuDrinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 16, fontWeight: "900", marginTop: 10 },
-  menuDrinkDetail: { color: COLORS.muted, fontSize: 7.5, lineHeight: 11, minHeight: 22, marginTop: 4 },
+  menuDrinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 16, lineHeight: 19, fontWeight: "900", minHeight: 40, marginTop: 10 },
+  menuDrinkDetail: { color: COLORS.muted, fontSize: 7.5, lineHeight: 11, minHeight: 28, marginTop: 4 },
   menuDrinkPrice: { color: COLORS.ink, fontSize: 11, fontWeight: "900" },
   powerCardShadow: { borderRadius: 26, marginBottom: 34, shadowColor: "#071B14", shadowOpacity: 0.42, shadowOffset: { width: 0, height: 12 }, shadowRadius: 16, elevation: 12 },
   powerCard: { minHeight: 208, borderRadius: 26, backgroundColor: COLORS.ink, overflow: "hidden", flexDirection: "row" },
@@ -865,8 +888,8 @@ const styles = StyleSheet.create({
   drinkCard: { width: 174, backgroundColor: COLORS.white, borderRadius: 20, padding: 10 },
   drinkVisual: { height: 153, borderRadius: 14, alignItems: "center", justifyContent: "flex-end", overflow: "hidden" },
   drinkTag: { position: "absolute", left: 10, top: 10, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 12, borderWidth: 2, borderColor: COLORS.green, paddingHorizontal: 11, paddingVertical: 7, fontSize: 9.5, fontWeight: "900", letterSpacing: 0.8, zIndex: 5, shadowColor: "#000", shadowOpacity: 0.2, shadowOffset: { width: 0, height: 3 }, shadowRadius: 4, elevation: 5 },
-  drinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 17, fontWeight: "900", marginTop: 12 },
-  drinkDetail: { color: COLORS.muted, fontSize: 8, marginTop: 5 },
+  drinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 17, lineHeight: 20, fontWeight: "900", minHeight: 40, marginTop: 12 },
+  drinkDetail: { color: COLORS.muted, fontSize: 8, lineHeight: 12, minHeight: 24, marginTop: 5 },
   drinkBottom: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 },
   drinkPrice: { color: COLORS.ink, fontSize: 11, fontWeight: "900" },
   addButton: { width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.orange, alignItems: "center", justifyContent: "center" },
@@ -904,8 +927,6 @@ const styles = StyleSheet.create({
   addConfiguredPrice: { color: COLORS.yellow, fontSize: 12, fontWeight: "900" },
   bottomNav: { position: "absolute", left: 0, right: 0, bottom: 0, height: 94, backgroundColor: COLORS.white, borderTopWidth: 1, borderColor: "#E5E0D6", flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingBottom: 10 },
   navItem: { width: 60, alignItems: "center", justifyContent: "center", gap: 4 },
-  navIcon: { color: "#9B9C95", fontSize: 25, lineHeight: 28 },
-  navIconActive: { color: COLORS.orange, fontSize: 26, lineHeight: 29 },
   navLabel: { color: "#9B9C95", fontSize: 10.5, fontWeight: "700" },
   navLabelActive: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900" },
   cartButton: { width: 58, height: 58, marginTop: -30, borderRadius: 20, backgroundColor: COLORS.ink, borderWidth: 5, borderColor: COLORS.cream, alignItems: "center", justifyContent: "center" },
