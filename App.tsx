@@ -221,7 +221,7 @@ function ProductPhoto({
     return (
       <Image
         source={imageSource}
-        style={[styles.productPhoto, hero && styles.productPhotoHero]}
+        style={hero ? styles.productPhotoHero : styles.productPhoto}
         resizeMode="cover"
         accessibilityLabel={`${name} product photo`}
       />
@@ -229,7 +229,7 @@ function ProductPhoto({
   }
 
   return (
-    <View style={[styles.productPhotoPlaceholder, hero && styles.productPhotoPlaceholderHero]}>
+    <View style={[styles.productPhotoPlaceholderBase, hero ? styles.productPhotoPlaceholderHero : styles.productPhotoPlaceholder]}>
       <View style={styles.productPhotoIcon}>
         <Ionicons name="camera-outline" size={hero ? 27 : 22} color={COLORS.green} />
       </View>
@@ -1001,9 +1001,10 @@ const styles = StyleSheet.create({
   heroCupWrap: { flex: 1, alignItems: "center", justifyContent: "flex-end", position: "relative" },
   heroSun: { position: "absolute", top: 28, width: 130, height: 130, borderRadius: 65, backgroundColor: COLORS.yellow },
   productPhoto: { width: "100%", height: "100%", borderRadius: 14 },
-  productPhotoHero: { width: "88%", height: "78%", marginBottom: 0, borderRadius: 18 },
-  productPhotoPlaceholder: { width: "78%", height: "68%", borderRadius: 15, borderWidth: 1.5, borderStyle: "dashed", borderColor: COLORS.green, backgroundColor: "rgba(238, 235, 203, 0.88)", alignItems: "center", justifyContent: "center", paddingHorizontal: 8, zIndex: 2 },
-  productPhotoPlaceholderHero: { width: "86%", height: "70%", marginBottom: 0, borderColor: "#D7D5B3", backgroundColor: "rgba(238, 235, 203, 0.94)" },
+  productPhotoHero: { width: "84%", maxWidth: 118, aspectRatio: 0.78, borderRadius: 18 },
+  productPhotoPlaceholderBase: { borderRadius: 15, borderWidth: 1.5, borderStyle: "dashed", borderColor: COLORS.green, alignItems: "center", justifyContent: "center", paddingHorizontal: 8, zIndex: 2 },
+  productPhotoPlaceholder: { width: "78%", height: "68%", backgroundColor: "rgba(238, 235, 203, 0.88)" },
+  productPhotoPlaceholderHero: { width: "84%", maxWidth: 118, aspectRatio: 0.78, borderColor: "#D7D5B3", backgroundColor: "rgba(238, 235, 203, 0.94)" },
   productPhotoIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: "#D6D3B1", alignItems: "center", justifyContent: "center", marginBottom: 7 },
   productPhotoLabel: { color: COLORS.orange, fontSize: 7, fontWeight: "900", letterSpacing: 1.1, textAlign: "center" },
   productPhotoName: { color: COLORS.ink, fontSize: 8.5, lineHeight: 11, fontWeight: "800", textAlign: "center", marginTop: 3 },
