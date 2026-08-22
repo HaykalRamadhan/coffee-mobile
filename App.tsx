@@ -18,13 +18,37 @@ import {
   TextInput,
   View,
   useWindowDimensions,
+  type AppStateStatus,
   type ImageSourcePropType,
   type TextProps,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { CheckoutScreen } from "./components/CheckoutScreen";
+import { MaintenanceScreen } from "./components/MaintenanceScreen";
+import { MidtransPaymentScreen } from "./components/MidtransPaymentScreen";
+import { OrderHistoryScreen } from "./components/OrderHistoryScreen";
+import { ProfileScreen } from "./components/ProfileScreen";
+import {
+  clearGuestCart,
+  clearPendingAccountCart,
+  loadAccountCart,
+  loadGuestCart,
+  loadPendingAccountCart,
+  replaceAccountCart,
+  savePendingAccountCart,
+  saveGuestCart,
+  type CheckoutOrder,
+} from "./lib/cart";
+import { getMaintenanceConfig } from "./lib/maintenance";
+import {
+  isActiveOrder,
+  loadAccountOrders,
+  orderStatusLabel,
+  type AccountOrder,
+} from "./lib/orders";
 import {
   EMPTY_CART,
-  PLACEHOLDER_SESSION,
   type CartItem,
   type CartState,
   type ProductCustomization,
@@ -78,6 +102,28 @@ const defaultCustomization: ProductCustomization = {
 };
 
 const formatRupiah = (amount: number) => `Rp ${amount.toLocaleString("id-ID")}`;
+const formatCompactOrderDate = (createdAt: string) => new Date(createdAt).toLocaleDateString("id-ID", {
+  day: "numeric",
+  month: "short",
+});
+
+const mergeCartItems = (...itemGroups: CartItem[][]) => {
+  const merged = new Map<string, CartItem>();
+  itemGroups.flat().forEach((item) => merged.set(item.lineId, item));
+  return [...merged.values()];
+};
+
+type CartSyncStatus = "loading" | "syncing" | "reconnecting" | "saved" | "error";
+
+const isTemporaryCartSyncError = (error: string) => (
+  /abort|network|fetch|timeout|timed out|connection/i.test(error)
+);
+
+const getCartSyncErrorMessage = (error: string) => (
+  isTemporaryCartSyncError(error)
+    ? "Connection was interrupted. Retrying automatically…"
+    : error
+);
 
 const getConfiguredPrice = (drink: Drink, options: ProductCustomization) => {
   if (drink.category === "Snacks") return drink.basePrice;
@@ -239,7 +285,8 @@ function ProductPhoto({
   );
 }
 
-export default function App() {
+function KopiPowApp() {
+  const { appUser, isAuthenticated, session } = useAuth();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const useSingleMenuColumn = screenWidth < 340;
   const useThreeMenuColumns = screenWidth >= 700;
@@ -249,10 +296,20 @@ export default function App() {
   const targetFontScale = isClassicWidePhone ? 1.24 : screenWidth >= 400 ? 1.18 : screenWidth < 350 ? 1.08 : 1.12;
   const typographyScale = Math.max(1, targetFontScale / cappedSystemFontScale);
   const [showSplash, setShowSplash] = useState(true);
-  const [activeTab, setActiveTab] = useState<"Home" | "Menu" | "Cart" | "Rewards">("Home");
+  const [activeTab, setActiveTab] = useState<"Home" | "Menu" | "Cart" | "Rewards" | "Profile">("Home");
   const [activeCategory, setActiveCategory] = useState("For you");
   const [searchQuery, setSearchQuery] = useState("");
   const [cart, setCart] = useState<CartState>(EMPTY_CART);
+  const [cartOwnerKey, setCartOwnerKey] = useState<string | null>(null);
+  const [cartSyncStatus, setCartSyncStatus] = useState<CartSyncStatus>("loading");
+  const [cartSyncError, setCartSyncError] = useState<string | null>(null);
+  const [cartHydrationVersion, setCartHydrationVersion] = useState(0);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [paymentOrder, setPaymentOrder] = useState<CheckoutOrder | null>(null);
+  const [isOrderHistoryOpen, setIsOrderHistoryOpen] = useState(false);
+  const [orders, setOrders] = useState<AccountOrder[]>([]);
+  const [isOrdersLoading, setIsOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
   const [selectedDrink, setSelectedDrink] = useState<Drink | null>(null);
   const [customization, setCustomization] = useState<ProductCustomization>(defaultCustomization);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -262,9 +319,28 @@ export default function App() {
   const chargingProgress = useRef(new Animated.Value(0)).current;
   const navigationHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const currentUser = PLACEHOLDER_SESSION.user;
+  const cartSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cartRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cartSyncAbortController = useRef<AbortController | null>(null);
+  const cartSyncInFlight = useRef(false);
+  const cartSyncQueued = useRef(false);
+  const cartHasPendingChanges = useRef(false);
+  const cartRevision = useRef(0);
+  const cartRetryCount = useRef(0);
+  const cartItemsRef = useRef<CartItem[]>([]);
+  const cartOwnerKeyRef = useRef<string | null>(null);
+  const accountUserIdRef = useRef<string | null>(null);
+  const ordersRefreshInFlight = useRef<Promise<void> | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const skipNextCartSync = useRef(false);
+  const localCartSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  cartItemsRef.current = cart.items;
+  cartOwnerKeyRef.current = cartOwnerKey;
+  accountUserIdRef.current = session?.user.id ?? null;
+  const currentUser = appUser;
   const cartItemCount = cart.items.reduce((total, item) => total + item.quantity, 0);
   const cartSubtotal = cart.items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
+  const latestOrder = orders.find(isActiveOrder) ?? orders[0] ?? null;
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const categorySearch = categories.find(
     (category) => category !== "For you" && category.toLocaleLowerCase() === normalizedSearchQuery,
@@ -352,13 +428,318 @@ export default function App() {
     }));
   };
 
+  const clearCartSyncTimers = () => {
+    if (cartSyncTimer.current) clearTimeout(cartSyncTimer.current);
+    if (cartRetryTimer.current) clearTimeout(cartRetryTimer.current);
+    cartSyncTimer.current = null;
+    cartRetryTimer.current = null;
+  };
+
+  function scheduleCartSync(delay = 450) {
+    if (cartSyncTimer.current) clearTimeout(cartSyncTimer.current);
+    cartSyncTimer.current = null;
+
+    if (appStateRef.current !== "active") {
+      cartSyncQueued.current = true;
+      return;
+    }
+
+    cartSyncTimer.current = setTimeout(() => {
+      cartSyncTimer.current = null;
+      void runCartSync();
+    }, delay);
+  }
+
+  async function runCartSync() {
+    const userId = accountUserIdRef.current;
+    if (
+      !userId
+      || cartOwnerKeyRef.current !== userId
+      || !cartHasPendingChanges.current
+    ) return;
+
+    if (appStateRef.current !== "active" || cartSyncInFlight.current) {
+      cartSyncQueued.current = true;
+      return;
+    }
+
+    const revision = cartRevision.current;
+    const items = cartItemsRef.current;
+    const controller = new AbortController();
+    cartSyncAbortController.current = controller;
+    cartSyncInFlight.current = true;
+    cartSyncQueued.current = false;
+    setCartSyncStatus(cartRetryCount.current > 0 ? "reconnecting" : "syncing");
+
+    const handleFailure = (error: string) => {
+      if (accountUserIdRef.current !== userId) return;
+      const temporary = isTemporaryCartSyncError(error);
+      cartHasPendingChanges.current = true;
+      cartSyncQueued.current = temporary;
+      setCartSyncError(getCartSyncErrorMessage(error));
+      setCartSyncStatus(temporary ? "reconnecting" : "error");
+
+      if (temporary && appStateRef.current === "active") {
+        cartRetryCount.current += 1;
+        const retryDelay = Math.min(1_500 * (2 ** (cartRetryCount.current - 1)), 15_000);
+        if (cartRetryTimer.current) clearTimeout(cartRetryTimer.current);
+        cartRetryTimer.current = setTimeout(() => {
+          cartRetryTimer.current = null;
+          void runCartSync();
+        }, retryDelay);
+      }
+    };
+
+    try {
+      const result = await replaceAccountCart(items, controller.signal);
+      if (accountUserIdRef.current !== userId) return;
+
+      if (result.error) {
+        handleFailure(result.error);
+        return;
+      }
+
+      if (revision !== cartRevision.current) {
+        cartSyncQueued.current = true;
+        return;
+      }
+
+      localCartSaveQueue.current = localCartSaveQueue.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (revision === cartRevision.current && accountUserIdRef.current === userId) {
+            await clearPendingAccountCart(userId);
+          }
+        });
+      await localCartSaveQueue.current;
+
+      if (revision !== cartRevision.current || accountUserIdRef.current !== userId) {
+        cartSyncQueued.current = true;
+        return;
+      }
+
+      cartHasPendingChanges.current = false;
+      cartSyncQueued.current = false;
+      cartRetryCount.current = 0;
+      setCartSyncError(null);
+      setCartSyncStatus("saved");
+    } catch (error) {
+      handleFailure(error instanceof Error ? error.message : "The cart could not be synced.");
+    } finally {
+      const ownsCurrentRequest = cartSyncAbortController.current === controller;
+      if (ownsCurrentRequest) {
+        cartSyncInFlight.current = false;
+        cartSyncAbortController.current = null;
+      }
+
+      if (
+        ownsCurrentRequest
+        && cartSyncQueued.current
+        && cartHasPendingChanges.current
+        && appStateRef.current === "active"
+        && !cartRetryTimer.current
+      ) scheduleCartSync(0);
+    }
+  }
+
+  useEffect(() => {
+    let isActive = true;
+    const nextOwnerKey = session?.user.id ?? "guest";
+
+    clearCartSyncTimers();
+    cartSyncAbortController.current?.abort();
+    cartSyncQueued.current = false;
+    cartHasPendingChanges.current = false;
+    cartRetryCount.current = 0;
+    cartRevision.current += 1;
+    setCartOwnerKey(null);
+    setCartSyncStatus("loading");
+    setCartSyncError(null);
+
+    const hydrateCart = async () => {
+      const guestItems = await loadGuestCart();
+      if (!session?.user) {
+        if (!isActive) return;
+        setCart({ items: guestItems, currency: "IDR" });
+        setCartOwnerKey(nextOwnerKey);
+        setCartSyncStatus("saved");
+        return;
+      }
+
+      const userId = session.user.id;
+      const pendingItems = await loadPendingAccountCart(userId);
+      const accountCart = await loadAccountCart();
+      if (!isActive) return;
+
+      if (accountCart.error) {
+        const recoverableItems = pendingItems ?? (guestItems.length > 0 ? guestItems : null);
+        if (!recoverableItems) {
+          setCart({ items: [], currency: "IDR" });
+          setCartSyncError(getCartSyncErrorMessage(accountCart.error));
+          setCartSyncStatus(isTemporaryCartSyncError(accountCart.error) ? "reconnecting" : "error");
+          return;
+        }
+
+        const mergedItems = mergeCartItems(recoverableItems, guestItems);
+        await savePendingAccountCart(userId, mergedItems);
+        if (guestItems.length > 0) await clearGuestCart();
+        if (!isActive) return;
+
+        cartHasPendingChanges.current = true;
+        cartSyncQueued.current = true;
+        setCart({ items: mergedItems, currency: "IDR" });
+        setCartOwnerKey(nextOwnerKey);
+        setCartSyncError(getCartSyncErrorMessage(accountCart.error));
+        setCartSyncStatus("reconnecting");
+        return;
+      }
+
+      const hasPendingCart = pendingItems !== null || guestItems.length > 0;
+      const mergedItems = mergeCartItems(pendingItems ?? accountCart.items, guestItems);
+      if (hasPendingCart) {
+        await savePendingAccountCart(userId, mergedItems);
+        if (guestItems.length > 0) await clearGuestCart();
+        cartHasPendingChanges.current = true;
+        cartSyncQueued.current = true;
+      } else {
+        skipNextCartSync.current = true;
+      }
+      if (!isActive) return;
+
+      setCart({ items: mergedItems, currency: "IDR" });
+      setCartOwnerKey(nextOwnerKey);
+      setCartSyncStatus(hasPendingCart ? "syncing" : "saved");
+    };
+
+    void hydrateCart();
+    return () => {
+      isActive = false;
+    };
+  }, [session?.user.id, cartHydrationVersion]);
+
+  useEffect(() => {
+    const expectedOwnerKey = session?.user.id ?? "guest";
+    if (cartOwnerKey !== expectedOwnerKey) return;
+
+    if (skipNextCartSync.current) {
+      skipNextCartSync.current = false;
+      return;
+    }
+
+    if (cartSyncTimer.current) clearTimeout(cartSyncTimer.current);
+    if (cartRetryTimer.current) clearTimeout(cartRetryTimer.current);
+    cartSyncTimer.current = null;
+    cartRetryTimer.current = null;
+
+    if (!session?.user) {
+      void saveGuestCart(cart.items).catch(() => undefined);
+      setCartSyncStatus("saved");
+      return;
+    }
+
+    const userId = session.user.id;
+    const revision = cartRevision.current + 1;
+    cartRevision.current = revision;
+    cartHasPendingChanges.current = true;
+    cartSyncQueued.current = true;
+    cartRetryCount.current = 0;
+    setCartSyncError(null);
+    setCartSyncStatus(appStateRef.current === "active" ? "syncing" : "reconnecting");
+
+    localCartSaveQueue.current = localCartSaveQueue.current
+      .catch(() => undefined)
+      .then(() => savePendingAccountCart(userId, cart.items));
+
+    void localCartSaveQueue.current.then(() => {
+      if (
+        revision === cartRevision.current
+        && accountUserIdRef.current === userId
+        && cartOwnerKeyRef.current === userId
+      ) scheduleCartSync(450);
+    }).catch(() => {
+      if (accountUserIdRef.current !== userId) return;
+      cartSyncQueued.current = false;
+      setCartSyncError("The cart could not be saved on this device.");
+      setCartSyncStatus("error");
+    });
+  }, [cart, cartOwnerKey, session?.user.id]);
+
+  useEffect(() => {
+    const handleCartAppStateChange = (nextState: AppStateStatus) => {
+      appStateRef.current = nextState;
+      const userId = accountUserIdRef.current;
+
+      if (nextState !== "active") {
+        clearCartSyncTimers();
+        cartSyncAbortController.current?.abort();
+        if (userId && cartHasPendingChanges.current) {
+          cartSyncQueued.current = true;
+          setCartSyncStatus("reconnecting");
+          setCartSyncError("Cart saved on this device. It will reconnect when you return.");
+          localCartSaveQueue.current = localCartSaveQueue.current
+            .catch(() => undefined)
+            .then(() => savePendingAccountCart(userId, cartItemsRef.current));
+        }
+        return;
+      }
+
+      if (userId && cartOwnerKeyRef.current !== userId) {
+        setCartHydrationVersion((version) => version + 1);
+        return;
+      }
+
+      if (userId && cartHasPendingChanges.current) {
+        cartSyncQueued.current = true;
+        setCartSyncError("Reconnecting and saving your latest cart…");
+        setCartSyncStatus("reconnecting");
+        scheduleCartSync(0);
+      }
+    };
+
+    const appStateSubscription = AppState.addEventListener("change", handleCartAppStateChange);
+    return () => {
+      appStateSubscription.remove();
+      clearCartSyncTimers();
+      cartSyncAbortController.current?.abort();
+    };
+  }, []);
+
+  const refreshOrders = () => {
+    if (ordersRefreshInFlight.current) return ordersRefreshInFlight.current;
+
+    const request = (async () => {
+      if (!session?.user) {
+        setOrders([]);
+        setOrdersError(null);
+        setIsOrdersLoading(false);
+        return;
+      }
+
+      setIsOrdersLoading(true);
+      const result = await loadAccountOrders();
+      setOrders(result.orders);
+      setOrdersError(result.error);
+      setIsOrdersLoading(false);
+    })().finally(() => {
+      ordersRefreshInFlight.current = null;
+    });
+
+    ordersRefreshInFlight.current = request;
+    return request;
+  };
+
+  useEffect(() => {
+    void refreshOrders();
+  }, [session?.user.id]);
+
   const refreshContent = () => {
     if (isRefreshing) return;
 
     setIsRefreshing(true);
+    if (session?.user) void refreshOrders();
 
     // This remounts the visible page while keeping local cart and session state.
-    // Replace the delay with Supabase menu, profile, cart, and rewards requests later.
+    // Replace the remaining delay with Supabase menu and rewards requests later.
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(() => {
       setRefreshVersion((version) => version + 1);
@@ -492,6 +873,69 @@ export default function App() {
       <SafeAreaProvider>
         <SafeAreaView style={styles.safeArea}>
         <StatusBar hidden />
+        {paymentOrder ? (
+          <MidtransPaymentScreen
+            key={paymentOrder.orderId}
+            orderId={paymentOrder.orderId}
+            total={paymentOrder.total}
+            onPaymentUpdated={() => { void refreshOrders(); }}
+            onBack={() => {
+              setPaymentOrder(null);
+              setIsCheckoutOpen(false);
+              setIsOrderHistoryOpen(true);
+              void refreshOrders();
+            }}
+          />
+        ) : isCheckoutOpen ? (
+          <CheckoutScreen
+            accountEmail={appUser.email}
+            cartItems={cart.items}
+            customerName={appUser.displayName}
+            subtotal={cartSubtotal}
+            onBack={() => setIsCheckoutOpen(false)}
+            onOrderCreated={(order) => {
+              const userId = session?.user.id;
+              clearCartSyncTimers();
+              cartSyncAbortController.current?.abort();
+              cartRevision.current += 1;
+              cartHasPendingChanges.current = false;
+              cartSyncQueued.current = false;
+              cartRetryCount.current = 0;
+              skipNextCartSync.current = true;
+              if (userId) {
+                localCartSaveQueue.current = localCartSaveQueue.current
+                  .catch(() => undefined)
+                  .then(() => clearPendingAccountCart(userId));
+              }
+              setCart(EMPTY_CART);
+              setCartSyncError(null);
+              setCartSyncStatus("saved");
+              setPaymentOrder(order);
+              void refreshOrders();
+            }}
+          />
+        ) : isOrderHistoryOpen ? (
+          <OrderHistoryScreen
+            error={ordersError}
+            isLoading={isOrdersLoading}
+            orders={orders}
+            onBack={() => setIsOrderHistoryOpen(false)}
+            onRefresh={() => { void refreshOrders(); }}
+            onContinuePayment={(order) => {
+              if (order.status === "cancelled") return;
+              setIsOrderHistoryOpen(false);
+              setPaymentOrder({
+                orderId: order.id,
+                subtotal: order.subtotal,
+                total: order.total,
+              });
+            }}
+            onBrowseMenu={() => {
+              setIsOrderHistoryOpen(false);
+              setActiveTab("Menu");
+            }}
+          />
+        ) : <>
         {activeTab === "Home" ? <ScrollView key={`home-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
@@ -501,11 +945,37 @@ export default function App() {
               <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
-          <Pressable style={styles.avatar} accessibilityLabel="Open profile">
+          <Pressable style={styles.avatar} accessibilityLabel="Open profile" onPress={() => setActiveTab("Profile")}>
             <Text style={styles.avatarText}>{currentUser.initials}</Text>
             <View style={styles.onlineDot} />
           </Pressable>
         </View>
+
+        {isAuthenticated && (
+          <Pressable style={styles.homeOrderBar} onPress={() => setIsOrderHistoryOpen(true)}>
+            <View style={styles.homeOrderIcon}>
+              <Ionicons name={latestOrder ? "receipt-outline" : "bag-handle-outline"} size={23} color={COLORS.green} />
+            </View>
+            <View style={styles.homeOrderCopy}>
+              <Text style={styles.homeOrderEyebrow}>{latestOrder && isActiveOrder(latestOrder) ? "ACTIVE ORDER" : "YOUR ORDERS"}</Text>
+              <Text style={styles.homeOrderTitle} numberOfLines={1}>
+                {isOrdersLoading && !latestOrder
+                  ? "Loading your orders…"
+                  : ordersError
+                    ? "Order history needs a refresh"
+                    : latestOrder
+                      ? `${orderStatusLabel[latestOrder.status]} · #${latestOrder.id.slice(0, 8).toUpperCase()}`
+                      : "No orders yet — start your first one"}
+              </Text>
+              {latestOrder && (
+                <Text style={styles.homeOrderDetail} numberOfLines={1}>
+                  {latestOrder.items.reduce((total, item) => total + item.quantity, 0)} items · {formatRupiah(latestOrder.total)} · {formatCompactOrderDate(latestOrder.createdAt)}
+                </Text>
+              )}
+            </View>
+            <Ionicons name="chevron-forward" size={21} color={COLORS.green} />
+          </Pressable>
+        )}
 
         <View style={styles.greetingBlock}>
           <Text style={styles.greeting}>Good morning, {currentUser.displayName}.</Text>
@@ -583,7 +1053,7 @@ export default function App() {
               <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
-          <Pressable style={styles.avatar} accessibilityLabel="Open profile">
+          <Pressable style={styles.avatar} accessibilityLabel="Open profile" onPress={() => setActiveTab("Profile")}>
             <Text style={styles.avatarText}>{currentUser.initials}</Text>
             <View style={styles.onlineDot} />
           </Pressable>
@@ -681,7 +1151,7 @@ export default function App() {
               <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
-          <Pressable style={styles.avatar} accessibilityLabel="Open profile">
+          <Pressable style={styles.avatar} accessibilityLabel="Open profile" onPress={() => setActiveTab("Profile")}>
             <Text style={styles.avatarText}>{currentUser.initials}</Text>
             <View style={styles.onlineDot} />
           </Pressable>
@@ -710,7 +1180,7 @@ export default function App() {
           <Text style={styles.comingSoonTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.74}>Something powerful{`\n`}is coming!</Text>
           <Text style={styles.comingSoonCopy}>We&apos;re brewing a rewards experience worth waiting for. Check back soon.</Text>
         </View>
-      </ScrollView> : <ScrollView key={`cart-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.cartContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      </ScrollView> : activeTab === "Cart" ? <ScrollView key={`cart-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.cartContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -719,7 +1189,7 @@ export default function App() {
               <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
             </View>
           </View>
-          <Pressable style={styles.avatar} accessibilityLabel="Open profile">
+          <Pressable style={styles.avatar} accessibilityLabel="Open profile" onPress={() => setActiveTab("Profile")}>
             <Text style={styles.avatarText}>{currentUser.initials}</Text>
             <View style={styles.onlineDot} />
           </Pressable>
@@ -729,6 +1199,39 @@ export default function App() {
           <Text style={styles.menuEyebrow}>YOUR POWER-UPS</Text>
           <Text style={styles.menuTitle}>Your Cart!</Text>
           <Text style={styles.cartHeadingCopy}>{cartItemCount} {cartItemCount === 1 ? "item" : "items"} ready to go</Text>
+        </View>
+
+        <View style={[styles.cartSaveCard, cartSyncStatus === "error" && styles.cartSaveCardError]}>
+          <Ionicons
+            name={!isAuthenticated ? "person-outline" : cartSyncStatus === "saved" ? "cloud-done-outline" : cartSyncStatus === "error" ? "cloud-offline-outline" : cartSyncStatus === "reconnecting" ? "sync-outline" : "cloud-upload-outline"}
+            size={22}
+            color={cartSyncStatus === "error" ? "#963A31" : COLORS.green}
+          />
+          <View style={styles.cartSaveCopy}>
+            <Text style={[styles.cartSaveTitle, cartSyncStatus === "error" && styles.cartSaveErrorText]}>
+              {!isAuthenticated
+                ? "Guest cart saved on this device"
+                : cartSyncStatus === "loading"
+                  ? "Loading your account cart…"
+                  : cartSyncStatus === "syncing"
+                    ? "Saving cart to your account…"
+                    : cartSyncStatus === "reconnecting"
+                      ? "Reconnecting your cart…"
+                      : cartSyncStatus === "error"
+                        ? "Cart is not synced"
+                        : "Cart saved to your account"}
+            </Text>
+            <Text style={[styles.cartSaveDetail, cartSyncStatus === "error" && styles.cartSaveErrorText]} numberOfLines={2}>
+              {!isAuthenticated
+                ? "Sign in before checkout to keep it across devices."
+                : cartSyncError ?? "Your cart follows this KopiPow account."}
+            </Text>
+          </View>
+          {!isAuthenticated && (
+            <Pressable style={styles.cartSignInButton} onPress={() => setActiveTab("Profile")}>
+              <Text style={styles.cartSignInText}>Sign in</Text>
+            </Pressable>
+          )}
         </View>
 
         {cart.items.length === 0 ? <View style={styles.emptyCart}>
@@ -781,11 +1284,30 @@ export default function App() {
             <Text style={styles.summaryNote}>Tax, service fees, promotions, and the final payable amount will be validated by the backend at checkout.</Text>
           </View>
 
-          <Pressable style={styles.checkoutLaterButton} disabled>
-            <Text style={styles.checkoutLaterText}>CHECKOUT · NEXT PHASE</Text>
+          <Pressable
+            style={[styles.checkoutButton, isAuthenticated && cartSyncStatus !== "saved" && styles.checkoutButtonDisabled]}
+            disabled={isAuthenticated && cartSyncStatus !== "saved"}
+            onPress={() => {
+              if (!isAuthenticated) {
+                setActiveTab("Profile");
+                return;
+              }
+              setIsCheckoutOpen(true);
+            }}
+          >
+            <Text style={styles.checkoutButtonText}>{isAuthenticated ? "CONTINUE TO CHECKOUT" : "SIGN IN TO CHECK OUT"}</Text>
+            <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
           </Pressable>
         </>}
-      </ScrollView>}
+      </ScrollView> : <ProfileScreen
+        key={`profile-screen-${refreshVersion}`}
+        refreshControl={pullToRefresh}
+        typographyScale={typographyScale}
+        orders={orders}
+        isOrdersLoading={isOrdersLoading}
+        ordersError={ordersError}
+        onOpenOrderHistory={() => setIsOrderHistoryOpen(true)}
+      />}
 
         <View style={styles.bottomNav}>
           <Pressable style={styles.navItem} onPress={() => setActiveTab("Home")}>
@@ -804,11 +1326,12 @@ export default function App() {
             <Ionicons name={activeTab === "Rewards" ? "heart" : "heart-outline"} size={25} color={activeTab === "Rewards" ? COLORS.orange : "#9B9C95"} />
             <Text style={activeTab === "Rewards" ? styles.navLabelActive : styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>Rewards</Text>
           </Pressable>
-          <Pressable style={styles.navItem}>
-            <Ionicons name="person-outline" size={24} color="#9B9C95" />
-            <Text style={styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Profile</Text>
+          <Pressable style={styles.navItem} onPress={() => setActiveTab("Profile")}>
+            <Ionicons name={activeTab === "Profile" ? "person" : "person-outline"} size={24} color={activeTab === "Profile" ? COLORS.orange : "#9B9C95"} />
+            <Text style={activeTab === "Profile" ? styles.navLabelActive : styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Profile</Text>
           </Pressable>
         </View>
+        </>}
 
         <Modal visible={selectedDrink !== null} transparent animationType="slide" onRequestClose={closeCustomizer}>
           <View style={styles.modalBackdrop}>
@@ -892,6 +1415,24 @@ export default function App() {
   );
 }
 
+export default function App() {
+  const maintenanceConfig = getMaintenanceConfig();
+
+  if (maintenanceConfig.enabled) {
+    return (
+      <SafeAreaProvider>
+        <MaintenanceScreen message={maintenanceConfig.message} />
+      </SafeAreaProvider>
+    );
+  }
+
+  return (
+    <AuthProvider>
+      <KopiPowApp />
+    </AuthProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   splashSafeArea: { flex: 1, backgroundColor: COLORS.cream, alignItems: "center", justifyContent: "center" },
   splashLogo: { alignItems: "center", justifyContent: "center" },
@@ -915,6 +1456,14 @@ const styles = StyleSheet.create({
   cartContent: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 128 },
   cartHeading: { paddingTop: 22, marginBottom: 24 },
   cartHeadingCopy: { color: COLORS.muted, fontSize: 12, fontWeight: "600", marginTop: 8 },
+  cartSaveCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#D8D6B6", borderRadius: 17, paddingHorizontal: 13, paddingVertical: 11, marginBottom: 14 },
+  cartSaveCardError: { backgroundColor: "#EBCBC4" },
+  cartSaveCopy: { flex: 1, marginLeft: 10, marginRight: 8 },
+  cartSaveTitle: { color: COLORS.ink, fontSize: 10.5, fontWeight: "900" },
+  cartSaveDetail: { color: COLORS.muted, fontSize: 8.5, lineHeight: 12, marginTop: 2 },
+  cartSaveErrorText: { color: "#963A31" },
+  cartSignInButton: { backgroundColor: COLORS.green, borderRadius: 13, paddingHorizontal: 12, paddingVertical: 8 },
+  cartSignInText: { color: COLORS.white, fontSize: 8.5, fontWeight: "900" },
   emptyCart: { alignItems: "center", justifyContent: "center", paddingTop: 72, paddingHorizontal: 30 },
   emptyCartIcon: { width: 104, height: 104, borderRadius: 34, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginBottom: 25 },
   emptyCartTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 27, textAlign: "center" },
@@ -944,8 +1493,9 @@ const styles = StyleSheet.create({
   summaryTotalLabel: { color: COLORS.yellow, fontFamily: "serif", fontStyle: "italic", fontSize: 17, fontWeight: "900" },
   summaryTotal: { color: COLORS.yellow, fontSize: 17, fontWeight: "900" },
   summaryNote: { color: "#AEBBB1", fontSize: 8, lineHeight: 12, marginTop: 6 },
-  checkoutLaterButton: { backgroundColor: "#9C9B86", borderRadius: 22, alignItems: "center", paddingVertical: 15, marginTop: 14 },
-  checkoutLaterText: { color: COLORS.white, fontSize: 10, fontWeight: "900", letterSpacing: 1.1 },
+  checkoutButton: { minHeight: 54, backgroundColor: COLORS.orange, borderRadius: 22, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 18, marginTop: 14 },
+  checkoutButtonDisabled: { backgroundColor: "#9C9B86", opacity: 0.72 },
+  checkoutButtonText: { color: COLORS.white, fontSize: 10, fontWeight: "900", letterSpacing: 1.1 },
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#BBB99A", borderRadius: 19, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 22 },
   logoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoMark: { width: 38, height: 38, borderRadius: 13, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-4deg" }] },
@@ -955,6 +1505,12 @@ const styles = StyleSheet.create({
   avatar: { width: 40, height: 40, borderRadius: 15, backgroundColor: COLORS.ink, alignItems: "center", justifyContent: "center", transform: [{ rotate: "3deg" }] },
   avatarText: { color: COLORS.white, fontSize: 15, fontWeight: "800" },
   onlineDot: { position: "absolute", right: -1, bottom: 1, width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.yellow, borderWidth: 2, borderColor: COLORS.cream },
+  homeOrderBar: { minHeight: 64, flexDirection: "row", alignItems: "center", backgroundColor: COLORS.white, borderRadius: 20, borderWidth: 1, borderColor: "#D8D3B2", paddingHorizontal: 12, paddingVertical: 10, marginTop: -8, marginBottom: -14, shadowColor: "#536055", shadowOpacity: 0.12, shadowOffset: { width: 0, height: 5 }, shadowRadius: 8, elevation: 3 },
+  homeOrderIcon: { width: 43, height: 43, borderRadius: 14, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginRight: 11 },
+  homeOrderCopy: { flex: 1, marginRight: 8 },
+  homeOrderEyebrow: { color: COLORS.orange, fontSize: 7.5, fontWeight: "900", letterSpacing: 1.05 },
+  homeOrderTitle: { color: COLORS.ink, fontSize: 10.5, fontWeight: "900", marginTop: 2 },
+  homeOrderDetail: { color: COLORS.muted, fontSize: 7.5, marginTop: 3 },
   greetingBlock: { paddingTop: 34, paddingBottom: 24, position: "relative" },
   greeting: { color: COLORS.muted, fontSize: 13, marginBottom: 8 },
   headline: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 42, lineHeight: 44, letterSpacing: -1.7 },

@@ -2,6 +2,7 @@
   "expo": {
     "name": "KopiPow",
     "slug": "kopipow",
+    "scheme": "kopipow",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -20,6 +21,9 @@
     "ios": {
       "bundleIdentifier": "com.kopipow.app",
       "supportsTablet": true
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }
