@@ -20,7 +20,7 @@ import {
 import {
   authRedirectUrl,
   isSupabaseConfigured,
-  setSupabaseAccessToken,
+  setSupabaseSession,
   supabaseAuth as supabase,
 } from "../lib/supabase";
 
@@ -142,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(({ data, error }) => {
         if (!isMounted) return;
         if (!error) {
-          setSupabaseAccessToken(data.session?.access_token ?? null);
+          setSupabaseSession(data.session);
           setSession(data.session);
         }
       })
@@ -153,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: authListener } = client.auth.onAuthStateChange((_event, nextSession) => {
       if (!isMounted) return;
-      setSupabaseAccessToken(nextSession?.access_token ?? null);
+      setSupabaseSession(nextSession);
       setSession(nextSession);
       setIsInitializing(false);
     });
