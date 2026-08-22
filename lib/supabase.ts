@@ -40,7 +40,16 @@ export const isSupabaseConfigured = Boolean(
   && !supabasePublishableKey.includes("your_key_here"),
 );
 
-export const supabase = isSupabaseConfigured
+let activeAccessToken: string | null = null;
+
+export const setSupabaseAccessToken = (accessToken: string | null) => {
+  activeAccessToken = accessToken;
+};
+
+// Authentication owns persistent storage and token refresh. Keeping it
+// separate prevents every cart/order/Function request from waiting on the
+// auth storage lock before it can reach Supabase.
+export const supabaseAuth = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabasePublishableKey!, {
     global: {
       fetch: fetchWithTimeout,
@@ -51,5 +60,16 @@ export const supabase = isSupabaseConfigured
       persistSession: true,
       detectSessionInUrl: false,
     },
+  })
+  : null;
+
+// App data calls use the access token already observed by AuthProvider. The
+// callback is lock-free and is refreshed synchronously on every auth event.
+export const supabase = isSupabaseConfigured
+  ? createClient(supabaseUrl!, supabasePublishableKey!, {
+    global: {
+      fetch: fetchWithTimeout,
+    },
+    accessToken: async () => activeAccessToken,
   })
   : null;

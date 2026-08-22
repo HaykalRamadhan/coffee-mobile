@@ -17,7 +17,12 @@ import {
   PLACEHOLDER_SESSION,
   type AppUser,
 } from "../appState";
-import { authRedirectUrl, isSupabaseConfigured, supabase } from "../lib/supabase";
+import {
+  authRedirectUrl,
+  isSupabaseConfigured,
+  setSupabaseAccessToken,
+  supabaseAuth as supabase,
+} from "../lib/supabase";
 
 type AuthResult = {
   error: string | null;
@@ -136,7 +141,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void client.auth.getSession()
       .then(({ data, error }) => {
         if (!isMounted) return;
-        if (!error) setSession(data.session);
+        if (!error) {
+          setSupabaseAccessToken(data.session?.access_token ?? null);
+          setSession(data.session);
+        }
       })
       .catch(() => undefined)
       .finally(() => {
@@ -145,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: authListener } = client.auth.onAuthStateChange((_event, nextSession) => {
       if (!isMounted) return;
+      setSupabaseAccessToken(nextSession?.access_token ?? null);
       setSession(nextSession);
       setIsInitializing(false);
     });

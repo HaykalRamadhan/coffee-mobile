@@ -113,7 +113,12 @@ export const loadAccountOrders = async (): Promise<OrdersResult> => {
 
   const { data, error } = result;
 
-  if (error) return { orders: [], error: error.message };
+  if (error) {
+    const message = /abort|timed? out/i.test(error.message)
+      ? "The account connection timed out. Tap Try again to reconnect."
+      : error.message;
+    return { orders: [], error: message };
+  }
 
   return {
     error: null,
