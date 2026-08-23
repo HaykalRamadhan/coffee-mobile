@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Network from "expo-network";
 import { StatusBar } from "expo-status-bar";
 import * as NavigationBar from "expo-navigation-bar";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
@@ -24,8 +25,15 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { AppUpdateManager } from "./components/AppUpdateManager";
 import { CheckoutScreen } from "./components/CheckoutScreen";
 import { MaintenanceScreen } from "./components/MaintenanceScreen";
+import {
+  MenuScreen,
+  menuDrinks,
+  type MenuCategory,
+  type MenuDrink,
+} from "./components/MenuScreen";
 import { MidtransPaymentScreen } from "./components/MidtransPaymentScreen";
 import { OrderHistoryScreen } from "./components/OrderHistoryScreen";
 import { ProfileScreen } from "./components/ProfileScreen";
@@ -42,11 +50,17 @@ import {
 } from "./lib/cart";
 import { getMaintenanceConfig } from "./lib/maintenance";
 import {
-  isActiveOrder,
   loadAccountOrders,
   orderStatusLabel,
   type AccountOrder,
 } from "./lib/orders";
+import { paymentGateway } from "./lib/payments";
+import {
+  clearPaymentCheckpoint,
+  isTerminalPaymentStatus,
+  loadPaymentCheckpoints,
+  savePaymentCheckpoint,
+} from "./lib/paymentRecovery";
 import {
   EMPTY_CART,
   type CartItem,
@@ -56,12 +70,12 @@ import {
 
 const COLORS = {
   ink: "#153F32",
-  cream: "#C9C7A7",
+  cream: "#dee0df",
   orange: "#D4A62A",
   yellow: "#E2B52F",
   green: "#204C3B",
   muted: "#526659",
-  white: "#EEEBCB",
+  white: "#FFFFFF",
 };
 
 const TypographyScaleContext = createContext(1);
@@ -77,7 +91,6 @@ function Text({ maxFontSizeMultiplier = 1.2, ...props }: TextProps) {
   return <NativeText maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} style={[props.style, responsiveStyle]} />;
 }
 
-const categories = ["For you", "Coffee", "Non-coffee", "Snacks"];
 const sizeOptions: ProductCustomization["size"][] = ["Small", "Regular", "Large"];
 const temperatureOptions: ProductCustomization["temperature"][] = ["Hot", "Iced"];
 const sugarOptions: ProductCustomization["sugar"][] = ["0%", "25%", "50%", "75%", "100%"];
@@ -138,117 +151,8 @@ const getConfiguredPrice = (drink: Drink, options: ProductCustomization) => {
   return drink.basePrice + sizeAdjustment + milkAdjustment + extrasAdjustment;
 };
 
-type Drink = {
-  id: number;
-  name: string;
-  detail: string;
-  price: string;
-  basePrice: number;
-  accent: string;
-  coffee: string;
-  imageSource: ImageSourcePropType | null;
-  tag: string;
-  category: "Coffee" | "Non-coffee" | "Snacks";
-};
-
-const drinks: Drink[] = [
-  {
-    id: 1,
-    name: "Power Latte",
-    detail: "Double espresso · oat milk",
-    price: "Rp 42k",
-    basePrice: 42000,
-    accent: "#D9B38A",
-    coffee: "#704129",
-    imageSource: null,
-    tag: "BESTSELLER",
-    category: "Coffee",
-  },
-  {
-    id: 2,
-    name: "Orange Bolt",
-    detail: "Espresso · orange tonic",
-    price: "Rp 39k",
-    basePrice: 39000,
-    accent: "#EE9851",
-    coffee: "#7A3825",
-    imageSource: null,
-    tag: "NEW",
-    category: "Coffee",
-  },
-  {
-    id: 3,
-    name: "Sesame Charge",
-    detail: "Black sesame · fresh milk",
-    price: "Rp 44k",
-    basePrice: 44000,
-    accent: "#A9A79C",
-    coffee: "#413A35",
-    imageSource: null,
-    tag: "SIGNATURE",
-    category: "Non-coffee",
-  },
-  {
-    id: 4,
-    name: "Matcha Pow",
-    detail: "Ceremonial matcha · oat milk",
-    price: "Rp 45k",
-    basePrice: 45000,
-    accent: "#9BAC75",
-    coffee: "#66804C",
-    imageSource: null,
-    tag: "FRESH",
-    category: "Non-coffee",
-  },
-  {
-    id: 5,
-    name: "Cocoa Kick",
-    detail: "Dark cocoa · fresh milk",
-    price: "Rp 38k",
-    basePrice: 38000,
-    accent: "#B68A6D",
-    coffee: "#56382C",
-    imageSource: null,
-    tag: "CLASSIC",
-    category: "Non-coffee",
-  },
-  {
-    id: 6,
-    name: "Long Black",
-    detail: "Double espresso · water",
-    price: "Rp 32k",
-    basePrice: 32000,
-    accent: "#948274",
-    coffee: "#33231D",
-    imageSource: null,
-    tag: "STRONG",
-    category: "Coffee",
-  },
-  {
-    id: 7,
-    name: "Butter Croffle",
-    detail: "Caramelized · sea salt",
-    price: "Rp 35k",
-    basePrice: 35000,
-    accent: "#D3A45F",
-    coffee: "#8B5D35",
-    imageSource: null,
-    tag: "CRISPY",
-    category: "Snacks",
-  },
-  {
-    id: 8,
-    name: "Power Banana",
-    detail: "Banana loaf · brown butter",
-    price: "Rp 34k",
-    basePrice: 34000,
-    accent: "#D9B75D",
-    coffee: "#7A5330",
-    imageSource: null,
-    tag: "BAKED",
-    category: "Snacks",
-  },
-];
+type Drink = MenuDrink;
+const drinks = menuDrinks;
 
 function Bolt() {
   return <Text style={styles.bolt}>ϟ</Text>;
@@ -288,8 +192,6 @@ function ProductPhoto({
 function KopiPowApp() {
   const { appUser, isAuthenticated, session } = useAuth();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const useSingleMenuColumn = screenWidth < 340;
-  const useThreeMenuColumns = screenWidth >= 700;
   const screenAspectRatio = Math.max(screenWidth, screenHeight) / Math.min(screenWidth, screenHeight);
   const isClassicWidePhone = screenAspectRatio < 1.9;
   const cappedSystemFontScale = Math.min(PixelRatio.getFontScale(), 1.2);
@@ -297,7 +199,7 @@ function KopiPowApp() {
   const typographyScale = Math.max(1, targetFontScale / cappedSystemFontScale);
   const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<"Home" | "Menu" | "Cart" | "Rewards" | "Profile">("Home");
-  const [activeCategory, setActiveCategory] = useState("For you");
+  const [activeCategory, setActiveCategory] = useState<MenuCategory>("For you");
   const [searchQuery, setSearchQuery] = useState("");
   const [cart, setCart] = useState<CartState>(EMPTY_CART);
   const [cartOwnerKey, setCartOwnerKey] = useState<string | null>(null);
@@ -310,6 +212,8 @@ function KopiPowApp() {
   const [orders, setOrders] = useState<AccountOrder[]>([]);
   const [isOrdersLoading, setIsOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [ordersRefreshVersion, setOrdersRefreshVersion] = useState(0);
+  const [networkAvailable, setNetworkAvailable] = useState(true);
   const [selectedDrink, setSelectedDrink] = useState<Drink | null>(null);
   const [customization, setCustomization] = useState<ProductCustomization>(defaultCustomization);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -331,49 +235,19 @@ function KopiPowApp() {
   const cartOwnerKeyRef = useRef<string | null>(null);
   const accountUserIdRef = useRef<string | null>(null);
   const ordersRefreshInFlight = useRef<Promise<void> | null>(null);
+  const paymentRecoveryInFlight = useRef<Promise<void> | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const networkAvailableRef = useRef(true);
   const skipNextCartSync = useRef(false);
   const localCartSaveQueue = useRef<Promise<void>>(Promise.resolve());
   cartItemsRef.current = cart.items;
   cartOwnerKeyRef.current = cartOwnerKey;
   accountUserIdRef.current = session?.user.id ?? null;
+  networkAvailableRef.current = networkAvailable;
   const currentUser = appUser;
   const cartItemCount = cart.items.reduce((total, item) => total + item.quantity, 0);
   const cartSubtotal = cart.items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
-  const latestOrder = orders.find(isActiveOrder) ?? orders[0] ?? null;
-  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
-  const categorySearch = categories.find(
-    (category) => category !== "For you" && category.toLocaleLowerCase() === normalizedSearchQuery,
-  );
-  const searchMatches = drinks.filter((drink) => {
-    if (!normalizedSearchQuery) return true;
-    if (categorySearch) return drink.category === categorySearch;
-
-    return [drink.name, drink.detail, drink.tag, drink.category]
-      .some((value) => value.toLocaleLowerCase().includes(normalizedSearchQuery));
-  });
-  const filteredDrinks = searchMatches.filter(
-    (drink) => activeCategory === "For you" || drink.category === activeCategory,
-  );
-  const recommendedCategories = normalizedSearchQuery && searchMatches.length > 0
-    ? [
-      "For you",
-      ...categories.filter(
-        (category) => category !== "For you" && searchMatches.some((drink) => drink.category === category),
-      ),
-    ]
-    : categories;
-
-  const updateSearchQuery = (value: string) => {
-    if (!searchQuery.trim() && value.trim()) setActiveCategory("For you");
-    setSearchQuery(value);
-  };
-
-  const clearSearch = () => {
-    setSearchQuery("");
-    setActiveCategory("For you");
-  };
-
+  const latestPendingOrder = orders.find((order) => order.status === "pending") ?? null;
   const openCustomizer = (drink: Drink) => {
     setCustomization({ ...defaultCustomization, extras: [] });
     setSelectedDrink(drink);
@@ -439,7 +313,7 @@ function KopiPowApp() {
     if (cartSyncTimer.current) clearTimeout(cartSyncTimer.current);
     cartSyncTimer.current = null;
 
-    if (appStateRef.current !== "active") {
+    if (appStateRef.current !== "active" || !networkAvailableRef.current) {
       cartSyncQueued.current = true;
       return;
     }
@@ -458,7 +332,7 @@ function KopiPowApp() {
       || !cartHasPendingChanges.current
     ) return;
 
-    if (appStateRef.current !== "active" || cartSyncInFlight.current) {
+    if (appStateRef.current !== "active" || !networkAvailableRef.current || cartSyncInFlight.current) {
       cartSyncQueued.current = true;
       return;
     }
@@ -544,6 +418,7 @@ function KopiPowApp() {
 
   useEffect(() => {
     let isActive = true;
+    let hydrationRetryTimer: ReturnType<typeof setTimeout> | null = null;
     const nextOwnerKey = session?.user.id ?? "guest";
 
     clearCartSyncTimers();
@@ -577,6 +452,11 @@ function KopiPowApp() {
           setCart({ items: [], currency: "IDR" });
           setCartSyncError(getCartSyncErrorMessage(accountCart.error));
           setCartSyncStatus(isTemporaryCartSyncError(accountCart.error) ? "reconnecting" : "error");
+          if (isTemporaryCartSyncError(accountCart.error) && appStateRef.current === "active" && networkAvailableRef.current) {
+            hydrationRetryTimer = setTimeout(() => {
+              if (isActive) setCartHydrationVersion((version) => version + 1);
+            }, 2_000);
+          }
           return;
         }
 
@@ -614,6 +494,7 @@ function KopiPowApp() {
     void hydrateCart();
     return () => {
       isActive = false;
+      if (hydrationRetryTimer) clearTimeout(hydrationRetryTimer);
     };
   }, [session?.user.id, cartHydrationVersion]);
 
@@ -665,6 +546,47 @@ function KopiPowApp() {
   }, [cart, cartOwnerKey, session?.user.id]);
 
   useEffect(() => {
+    let isActive = true;
+    const applyNetworkState = (state: Network.NetworkState) => {
+      if (!isActive) return;
+      setNetworkAvailable(state.isConnected !== false && state.isInternetReachable !== false);
+    };
+
+    void Network.getNetworkStateAsync().then(applyNetworkState).catch(() => undefined);
+    const subscription = Network.addNetworkStateListener(applyNetworkState);
+    return () => {
+      isActive = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const userId = accountUserIdRef.current;
+    if (!networkAvailable) {
+      clearCartSyncTimers();
+      cartSyncAbortController.current?.abort();
+      if (userId && cartHasPendingChanges.current) {
+        cartSyncQueued.current = true;
+        setCartSyncStatus("reconnecting");
+        setCartSyncError("Cart saved on this device. Sync is paused while you are offline.");
+        void savePendingAccountCart(userId, cartItemsRef.current).catch(() => undefined);
+      }
+      return;
+    }
+
+    setOrdersRefreshVersion((version) => version + 1);
+    if (!userId) return;
+    if (cartOwnerKeyRef.current !== userId) {
+      setCartHydrationVersion((version) => version + 1);
+    } else if (cartHasPendingChanges.current) {
+      cartSyncQueued.current = true;
+      setCartSyncStatus("reconnecting");
+      setCartSyncError("Connection restored. Saving your latest cart…");
+      scheduleCartSync(0);
+    }
+  }, [networkAvailable]);
+
+  useEffect(() => {
     const handleCartAppStateChange = (nextState: AppStateStatus) => {
       appStateRef.current = nextState;
       const userId = accountUserIdRef.current;
@@ -683,12 +605,14 @@ function KopiPowApp() {
         return;
       }
 
+      setOrdersRefreshVersion((version) => version + 1);
+
       if (userId && cartOwnerKeyRef.current !== userId) {
         setCartHydrationVersion((version) => version + 1);
         return;
       }
 
-      if (userId && cartHasPendingChanges.current) {
+      if (userId && cartHasPendingChanges.current && networkAvailableRef.current) {
         cartSyncQueued.current = true;
         setCartSyncError("Reconnecting and saving your latest cart…");
         setCartSyncStatus("reconnecting");
@@ -730,7 +654,42 @@ function KopiPowApp() {
 
   useEffect(() => {
     void refreshOrders();
-  }, [session?.user.id]);
+  }, [session?.user.id, ordersRefreshVersion]);
+
+  useEffect(() => {
+    const userId = session?.user.id;
+    if (!userId || !networkAvailable || appStateRef.current !== "active" || paymentRecoveryInFlight.current) return;
+
+    const recovery = (async () => {
+      const checkpoints = await loadPaymentCheckpoints(userId);
+      let didRecover = false;
+      for (const checkpoint of checkpoints) {
+        if (!networkAvailableRef.current || appStateRef.current !== "active") break;
+        const result = await paymentGateway.synchronizeStatus(checkpoint.orderId);
+        if (!result.data || result.error) continue;
+
+        didRecover = true;
+        if (isTerminalPaymentStatus(result.data.paymentStatus)) {
+          await clearPaymentCheckpoint(checkpoint.orderId);
+        } else {
+          await savePaymentCheckpoint({
+            ...checkpoint,
+            phase: "awaiting_confirmation",
+            lastKnownStatus: result.data.paymentStatus,
+          });
+        }
+      }
+      if (didRecover) await refreshOrders();
+    })().finally(() => {
+      paymentRecoveryInFlight.current = null;
+    });
+
+    paymentRecoveryInFlight.current = recovery;
+  }, [session?.user.id, networkAvailable, ordersRefreshVersion]);
+
+  useEffect(() => {
+    if (isOrderHistoryOpen) void refreshOrders();
+  }, [isOrderHistoryOpen]);
 
   const refreshContent = () => {
     if (isRefreshing) return;
@@ -877,7 +836,9 @@ function KopiPowApp() {
           <MidtransPaymentScreen
             key={paymentOrder.orderId}
             orderId={paymentOrder.orderId}
+            userId={session?.user.id ?? ""}
             total={paymentOrder.total}
+            networkAvailable={networkAvailable}
             onPaymentUpdated={() => { void refreshOrders(); }}
             onBack={() => {
               setPaymentOrder(null);
@@ -951,33 +912,25 @@ function KopiPowApp() {
           </Pressable>
         </View>
 
-        {isAuthenticated && (
+        {isAuthenticated && latestPendingOrder && (
           <Pressable style={styles.homeOrderBar} onPress={() => setIsOrderHistoryOpen(true)}>
             <View style={styles.homeOrderIcon}>
-              <Ionicons name={latestOrder ? "receipt-outline" : "bag-handle-outline"} size={23} color={COLORS.green} />
+              <Ionicons name="receipt-outline" size={23} color={COLORS.green} />
             </View>
             <View style={styles.homeOrderCopy}>
-              <Text style={styles.homeOrderEyebrow}>{latestOrder && isActiveOrder(latestOrder) ? "ACTIVE ORDER" : "YOUR ORDERS"}</Text>
+              <Text style={styles.homeOrderEyebrow}>ACTIVE ORDER</Text>
               <Text style={styles.homeOrderTitle} numberOfLines={1}>
-                {isOrdersLoading && !latestOrder
-                  ? "Loading your orders…"
-                  : ordersError
-                    ? "Order history needs a refresh"
-                    : latestOrder
-                      ? `${orderStatusLabel[latestOrder.status]} · #${latestOrder.id.slice(0, 8).toUpperCase()}`
-                      : "No orders yet — start your first one"}
+                {`${orderStatusLabel[latestPendingOrder.status]} · #${latestPendingOrder.id.slice(0, 8).toUpperCase()}`}
               </Text>
-              {latestOrder && (
-                <Text style={styles.homeOrderDetail} numberOfLines={1}>
-                  {latestOrder.items.reduce((total, item) => total + item.quantity, 0)} items · {formatRupiah(latestOrder.total)} · {formatCompactOrderDate(latestOrder.createdAt)}
-                </Text>
-              )}
+              <Text style={styles.homeOrderDetail} numberOfLines={1}>
+                {latestPendingOrder.items.reduce((total, item) => total + item.quantity, 0)} items · {formatRupiah(latestPendingOrder.total)} · {formatCompactOrderDate(latestPendingOrder.createdAt)}
+              </Text>
             </View>
             <Ionicons name="chevron-forward" size={21} color={COLORS.green} />
           </Pressable>
         )}
 
-        <View style={styles.greetingBlock}>
+        <View style={[styles.greetingBlock, !latestPendingOrder && styles.greetingBlockNoPendingOrder]}>
           <Text style={styles.greeting}>Good morning, {currentUser.displayName}.</Text>
           <Text style={styles.headline} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78}>Ready to power{`\n`}your way?</Text>
           <View style={styles.headlineBolt}><Bolt /></View>
@@ -1044,105 +997,20 @@ function KopiPowApp() {
           </View>
           <Text style={styles.rewardArrow}>›</Text>
         </View>
-      </ScrollView> : activeTab === "Menu" ? <ScrollView key={`menu-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.menuContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-        <View style={styles.topBar}>
-          <View style={styles.logoRow}>
-            <View style={styles.logoMark}><Bolt /></View>
-            <View>
-              <Text style={styles.logo} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.86}>Kopi POW!</Text>
-              <Text style={styles.logoLine}>99% REAAAADY TO GOW</Text>
-            </View>
-          </View>
-          <Pressable style={styles.avatar} accessibilityLabel="Open profile" onPress={() => setActiveTab("Profile")}>
-            <Text style={styles.avatarText}>{currentUser.initials}</Text>
-            <View style={styles.onlineDot} />
-          </Pressable>
-        </View>
-
-        <View style={styles.menuHeadingRow}>
-          <View>
-            <Text style={styles.menuEyebrow}>CHOOSE YOUR POWER</Text>
-            <Text style={styles.menuTitle}>The Menu!</Text>
-          </View>
-        </View>
-
-        <View style={styles.searchBar}>
-          <Ionicons name="search-outline" size={21} color={COLORS.green} style={styles.searchIcon} />
-          <TextInput
-            value={searchQuery}
-            onChangeText={updateSearchQuery}
-            placeholder="Search drinks, snacks, or ingredients"
-            placeholderTextColor={COLORS.muted}
-            selectionColor={COLORS.orange}
-            returnKeyType="search"
-            autoCorrect={false}
-            maxFontSizeMultiplier={1.2}
-            style={[styles.searchInput, { fontSize: 12.5 * typographyScale }]}
-            accessibilityLabel="Search the KopiPow menu"
-          />
-          {searchQuery.length > 0 && (
-            <Pressable onPress={clearSearch} style={styles.searchClear} accessibilityLabel="Clear menu search">
-              <Ionicons name="close-circle" size={22} color={COLORS.muted} />
-            </Pressable>
-          )}
-        </View>
-
-        <Text style={styles.categorySuggestionLabel}>
-          {normalizedSearchQuery && searchMatches.length > 0 ? "MATCHING CATEGORIES" : "RECOMMENDED CATEGORIES"}
-        </Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-          {recommendedCategories.map((category) => {
-            const selected = category === activeCategory;
-            return (
-              <Pressable key={category} onPress={() => setActiveCategory(category)} style={[styles.categoryChip, selected && styles.categoryChipActive]}>
-                <Text style={[styles.categoryText, selected && styles.categoryTextActive]}>{category}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        <View style={styles.menuSectionRow}>
-          <View>
-            <Text style={styles.sectionEyebrow}>{normalizedSearchQuery ? "SEARCH RESULTS" : activeCategory === "For you" ? "ALL-DAY POWER" : activeCategory.toUpperCase()}</Text>
-            <Text style={styles.menuSectionTitle} numberOfLines={2}>
-              {normalizedSearchQuery
-                ? `${filteredDrinks.length} ${filteredDrinks.length === 1 ? "match" : "matches"} for “${searchQuery.trim()}”`
-                : activeCategory === "For you" ? "Made for every mood" : `${activeCategory} picks`}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.menuGrid}>
-          {filteredDrinks.map((drink) => (
-            <View key={drink.id} style={[styles.menuCard, useSingleMenuColumn && styles.menuCardSingleColumn, useThreeMenuColumns && styles.menuCardThreeColumns]}>
-              <View style={[styles.menuDrinkVisual, { backgroundColor: drink.accent }]}> 
-                <Text style={styles.menuDrinkTag}>{drink.tag}</Text>
-                <ProductPhoto imageSource={drink.imageSource} name={drink.name} />
-              </View>
-              <Text style={styles.menuDrinkName} numberOfLines={2}>{drink.name}</Text>
-              <Text style={styles.menuDrinkDetail} numberOfLines={2}>{drink.detail}</Text>
-              <View style={styles.drinkBottom}>
-                <Text style={styles.menuDrinkPrice}>{drink.price}</Text>
-                <Pressable style={styles.addButton} accessibilityLabel={`Customize ${drink.name}`} onPress={() => openCustomizer(drink)}>
-                  <Text style={styles.addButtonText}>＋</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))}
-          {filteredDrinks.length === 0 && (
-            <View style={styles.emptySearchCard}>
-              <View style={styles.emptySearchIcon}>
-                <Ionicons name="search-outline" size={28} color={COLORS.green} />
-              </View>
-              <Text style={styles.emptySearchTitle}>No power-ups found</Text>
-              <Text style={styles.emptySearchCopy}>Try another name, ingredient, or category.</Text>
-              <Pressable onPress={clearSearch} style={styles.emptySearchButton}>
-                <Text style={styles.emptySearchButtonText}>Show all menu</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
-      </ScrollView> : activeTab === "Rewards" ? <ScrollView key={`rewards-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.rewardsPage} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      </ScrollView> : activeTab === "Menu" ? (
+        <MenuScreen
+          key={`menu-screen-${refreshVersion}`}
+          activeCategory={activeCategory}
+          currentUserInitials={currentUser.initials}
+          onActiveCategoryChange={setActiveCategory}
+          onCustomizeDrink={openCustomizer}
+          onOpenProfile={() => setActiveTab("Profile")}
+          onSearchQueryChange={setSearchQuery}
+          refreshControl={pullToRefresh}
+          searchQuery={searchQuery}
+          typographyScale={typographyScale}
+        />
+      ) : activeTab === "Rewards" ? <ScrollView key={`rewards-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.rewardsPage} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -1409,6 +1277,18 @@ function KopiPowApp() {
             </View>
           </View>
         </Modal>
+        <AppUpdateManager
+          blocked={
+            isCheckoutOpen
+            || Boolean(paymentOrder)
+            || Boolean(selectedDrink)
+            || isRefreshing
+            || cartSyncStatus === "loading"
+            || cartSyncStatus === "syncing"
+            || cartSyncStatus === "reconnecting"
+          }
+          networkAvailable={networkAvailable}
+        />
         </SafeAreaView>
       </SafeAreaProvider>
     </TypographyScaleContext.Provider>
@@ -1422,6 +1302,7 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <MaintenanceScreen message={maintenanceConfig.message} />
+        <AppUpdateManager blocked={false} networkAvailable />
       </SafeAreaProvider>
     );
   }
@@ -1452,11 +1333,10 @@ const styles = StyleSheet.create({
   comingSoonTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 36, lineHeight: 39, fontWeight: "900", letterSpacing: -1.3, textAlign: "center" },
   comingSoonCopy: { color: COLORS.muted, fontSize: 13, lineHeight: 20, textAlign: "center", maxWidth: 300, marginTop: 16 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 118 },
-  menuContent: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 118 },
   cartContent: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 128 },
   cartHeading: { paddingTop: 22, marginBottom: 24 },
   cartHeadingCopy: { color: COLORS.muted, fontSize: 12, fontWeight: "600", marginTop: 8 },
-  cartSaveCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#D8D6B6", borderRadius: 17, paddingHorizontal: 13, paddingVertical: 11, marginBottom: 14 },
+  cartSaveCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#EEF2EF", borderRadius: 17, paddingHorizontal: 13, paddingVertical: 11, marginBottom: 14 },
   cartSaveCardError: { backgroundColor: "#EBCBC4" },
   cartSaveCopy: { flex: 1, marginLeft: 10, marginRight: 8 },
   cartSaveTitle: { color: COLORS.ink, fontSize: 10.5, fontWeight: "900" },
@@ -1494,9 +1374,9 @@ const styles = StyleSheet.create({
   summaryTotal: { color: COLORS.yellow, fontSize: 17, fontWeight: "900" },
   summaryNote: { color: "#AEBBB1", fontSize: 8, lineHeight: 12, marginTop: 6 },
   checkoutButton: { minHeight: 54, backgroundColor: COLORS.orange, borderRadius: 22, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 18, marginTop: 14 },
-  checkoutButtonDisabled: { backgroundColor: "#9C9B86", opacity: 0.72 },
+  checkoutButtonDisabled: { backgroundColor: "#A7B0AB", opacity: 0.72 },
   checkoutButtonText: { color: COLORS.white, fontSize: 10, fontWeight: "900", letterSpacing: 1.1 },
-  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#BBB99A", borderRadius: 19, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 22 },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#F1F4F2", borderRadius: 19, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 22 },
   logoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoMark: { width: 38, height: 38, borderRadius: 13, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-4deg" }] },
   bolt: { color: COLORS.green, fontSize: 29, fontWeight: "900", lineHeight: 32 },
@@ -1505,46 +1385,19 @@ const styles = StyleSheet.create({
   avatar: { width: 40, height: 40, borderRadius: 15, backgroundColor: COLORS.ink, alignItems: "center", justifyContent: "center", transform: [{ rotate: "3deg" }] },
   avatarText: { color: COLORS.white, fontSize: 15, fontWeight: "800" },
   onlineDot: { position: "absolute", right: -1, bottom: 1, width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.yellow, borderWidth: 2, borderColor: COLORS.cream },
-  homeOrderBar: { minHeight: 64, flexDirection: "row", alignItems: "center", backgroundColor: COLORS.white, borderRadius: 20, borderWidth: 1, borderColor: "#D8D3B2", paddingHorizontal: 12, paddingVertical: 10, marginTop: -8, marginBottom: -14, shadowColor: "#536055", shadowOpacity: 0.12, shadowOffset: { width: 0, height: 5 }, shadowRadius: 8, elevation: 3 },
+  homeOrderBar: { minHeight: 64, flexDirection: "row", alignItems: "center", backgroundColor: COLORS.white, borderRadius: 20, borderWidth: 1, borderColor: "#DDE3DF", paddingHorizontal: 12, paddingVertical: 10, marginTop: -8, marginBottom: -14, shadowColor: "#536055", shadowOpacity: 0.12, shadowOffset: { width: 0, height: 5 }, shadowRadius: 8, elevation: 3 },
   homeOrderIcon: { width: 43, height: 43, borderRadius: 14, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginRight: 11 },
   homeOrderCopy: { flex: 1, marginRight: 8 },
   homeOrderEyebrow: { color: COLORS.orange, fontSize: 7.5, fontWeight: "900", letterSpacing: 1.05 },
   homeOrderTitle: { color: COLORS.ink, fontSize: 10.5, fontWeight: "900", marginTop: 2 },
   homeOrderDetail: { color: COLORS.muted, fontSize: 7.5, marginTop: 3 },
   greetingBlock: { paddingTop: 34, paddingBottom: 24, position: "relative" },
+  greetingBlockNoPendingOrder: { paddingTop: 0, paddingBottom: 38 },
   greeting: { color: COLORS.muted, fontSize: 13, marginBottom: 8 },
-  headline: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 42, lineHeight: 44, letterSpacing: -1.7 },
+  headline: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 42, lineHeight: 47, letterSpacing: -1.7, paddingBottom: 7, marginBottom: -7 },
   headlineBolt: { position: "absolute", right: 8, bottom: 24, width: 48, height: 48, borderRadius: 16, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "8deg" }] },
-  categoryRow: { gap: 9, paddingBottom: 24 },
-  categoryChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1, borderColor: "#DFDAB8", backgroundColor: COLORS.white },
-  categoryChipActive: { backgroundColor: COLORS.ink, borderColor: COLORS.ink },
-  categoryText: { color: COLORS.muted, fontSize: 14.5, fontWeight: "700" },
-  categoryTextActive: { color: COLORS.white },
-  menuHeadingRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", paddingTop: 26, marginBottom: 22 },
   menuEyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 6 },
   menuTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 43, lineHeight: 47, letterSpacing: -1.5 },
-  searchBar: { minHeight: 54, borderRadius: 17, backgroundColor: COLORS.white, borderWidth: 1, borderColor: "#DFDAB8", flexDirection: "row", alignItems: "center", paddingHorizontal: 15, marginBottom: 12 },
-  searchIcon: { marginRight: 10 },
-  searchInput: { flex: 1, minWidth: 0, color: COLORS.ink, fontWeight: "600", paddingVertical: 12 },
-  searchClear: { width: 36, height: 36, alignItems: "center", justifyContent: "center", marginRight: -8 },
-  categorySuggestionLabel: { color: COLORS.muted, fontSize: 8, fontWeight: "900", letterSpacing: 1.2, marginBottom: 8, marginLeft: 2 },
-  menuSectionRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", marginTop: 5, marginBottom: 15 },
-  menuSectionTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 24, fontWeight: "900" },
-  menuGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 13 },
-  emptySearchCard: { width: "100%", backgroundColor: COLORS.white, borderRadius: 22, paddingHorizontal: 24, paddingVertical: 30, alignItems: "center", borderWidth: 1, borderColor: "#DFDAB8" },
-  emptySearchIcon: { width: 54, height: 54, borderRadius: 18, backgroundColor: "#DCD9B8", alignItems: "center", justifyContent: "center", marginBottom: 13 },
-  emptySearchTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 21, fontWeight: "900", textAlign: "center" },
-  emptySearchCopy: { color: COLORS.muted, fontSize: 9, lineHeight: 14, textAlign: "center", marginTop: 6 },
-  emptySearchButton: { backgroundColor: COLORS.orange, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 11, marginTop: 17 },
-  emptySearchButtonText: { color: COLORS.white, fontSize: 9, fontWeight: "900" },
-  menuCard: { width: "48.3%", backgroundColor: COLORS.white, borderRadius: 20, padding: 9 },
-  menuCardSingleColumn: { width: "100%" },
-  menuCardThreeColumns: { width: "31.7%" },
-  menuDrinkVisual: { height: 145, borderRadius: 14, alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  menuDrinkTag: { position: "absolute", left: 8, top: 8, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 10, borderWidth: 1.5, borderColor: COLORS.green, paddingHorizontal: 8, paddingVertical: 5, fontSize: 7.5, fontWeight: "900", letterSpacing: 0.5, zIndex: 5, elevation: 4 },
-  menuDrinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 16, lineHeight: 19, fontWeight: "900", minHeight: 40, marginTop: 10 },
-  menuDrinkDetail: { color: COLORS.muted, fontSize: 7.5, lineHeight: 11, minHeight: 28, marginTop: 4 },
-  menuDrinkPrice: { color: COLORS.ink, fontSize: 11, fontWeight: "900" },
   powerCardShadow: { borderRadius: 26, marginBottom: 34, shadowColor: "#071B14", shadowOpacity: 0.42, shadowOffset: { width: 0, height: 12 }, shadowRadius: 16, elevation: 12 },
   powerCard: { minHeight: 208, borderRadius: 26, backgroundColor: COLORS.ink, overflow: "hidden", flexDirection: "row" },
   powerCardCopy: { width: "60%", padding: 21, zIndex: 2 },
@@ -1559,14 +1412,14 @@ const styles = StyleSheet.create({
   productPhoto: { width: "100%", height: "100%", borderRadius: 14 },
   productPhotoHero: { width: "84%", maxWidth: 118, aspectRatio: 0.78, borderRadius: 18 },
   productPhotoPlaceholderBase: { borderRadius: 15, borderWidth: 1.5, borderStyle: "dashed", borderColor: COLORS.green, alignItems: "center", justifyContent: "center", paddingHorizontal: 8, zIndex: 2 },
-  productPhotoPlaceholder: { width: "78%", height: "68%", backgroundColor: "rgba(238, 235, 203, 0.88)" },
-  productPhotoPlaceholderHero: { width: "84%", maxWidth: 118, aspectRatio: 0.78, borderColor: "#D7D5B3", backgroundColor: "rgba(238, 235, 203, 0.94)" },
-  productPhotoIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: "#D6D3B1", alignItems: "center", justifyContent: "center", marginBottom: 7 },
+  productPhotoPlaceholder: { width: "78%", height: "68%", backgroundColor: "rgba(255, 255, 255, 0.94)" },
+  productPhotoPlaceholderHero: { width: "84%", maxWidth: 118, aspectRatio: 0.78, borderColor: "#DDE3DF", backgroundColor: "rgba(255, 255, 255, 0.96)" },
+  productPhotoIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: "#E5EAE7", alignItems: "center", justifyContent: "center", marginBottom: 7 },
   productPhotoLabel: { color: COLORS.orange, fontSize: 7, fontWeight: "900", letterSpacing: 1.1, textAlign: "center" },
   productPhotoName: { color: COLORS.ink, fontSize: 8.5, lineHeight: 11, fontWeight: "800", textAlign: "center", marginTop: 3 },
   sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 },
   sectionEyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 5 },
-  sectionTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 25, fontWeight: "900" },
+  sectionTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 25, fontWeight: "900", paddingBottom: 5, marginBottom: -5 },
   drinkRow: { gap: 13, paddingBottom: 28 },
   drinkCard: { width: 174, backgroundColor: COLORS.white, borderRadius: 20, padding: 10 },
   drinkVisual: { height: 153, borderRadius: 14, alignItems: "center", justifyContent: "center", overflow: "hidden" },
@@ -1588,7 +1441,7 @@ const styles = StyleSheet.create({
   rewardArrow: { color: COLORS.white, fontSize: 26, marginLeft: 14 },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 34, 27, 0.48)" },
   customizerSheet: { height: "88%", backgroundColor: COLORS.cream, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingTop: 10, overflow: "hidden" },
-  customizerHandle: { width: 46, height: 5, borderRadius: 3, backgroundColor: "#8E907D", alignSelf: "center", marginBottom: 13 },
+  customizerHandle: { width: 46, height: 5, borderRadius: 3, backgroundColor: "#8C9791", alignSelf: "center", marginBottom: 13 },
   customizerHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingHorizontal: 20, paddingBottom: 15 },
   customizerEyebrow: { color: COLORS.orange, fontSize: 9, fontWeight: "900", letterSpacing: 1.4, marginBottom: 5 },
   customizerTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 29, fontWeight: "900", letterSpacing: -0.8 },
@@ -1599,16 +1452,16 @@ const styles = StyleSheet.create({
   optionGroup: { marginBottom: 19 },
   optionTitle: { color: COLORS.ink, fontSize: 12, fontWeight: "900", marginBottom: 9 },
   optionWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  optionChip: { backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: "#DDD8B8", borderRadius: 18, paddingHorizontal: 13, paddingVertical: 9 },
+  optionChip: { backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: "#DDE3DF", borderRadius: 18, paddingHorizontal: 13, paddingVertical: 9 },
   optionChipActive: { backgroundColor: COLORS.green, borderColor: COLORS.green },
   optionChipText: { color: COLORS.muted, fontSize: 10, fontWeight: "700" },
   optionChipTextActive: { color: COLORS.white, fontWeight: "900" },
-  noteInput: { minHeight: 78, borderRadius: 16, backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: "#DDD8B8", color: COLORS.ink, fontSize: 11, lineHeight: 16, paddingHorizontal: 14, paddingVertical: 12, textAlignVertical: "top" },
-  customizerFooter: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 18, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: "#DDD8B8" },
+  noteInput: { minHeight: 78, borderRadius: 16, backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: "#DDE3DF", color: COLORS.ink, fontSize: 11, lineHeight: 16, paddingHorizontal: 14, paddingVertical: 12, textAlignVertical: "top" },
+  customizerFooter: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 18, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: "#DDE3DF" },
   addConfiguredButton: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: COLORS.green, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 15 },
   addConfiguredText: { color: COLORS.white, fontSize: 12, fontWeight: "900" },
   addConfiguredPrice: { color: COLORS.yellow, fontSize: 12, fontWeight: "900" },
-  bottomNav: { position: "absolute", left: 0, right: 0, bottom: 0, height: 94, backgroundColor: COLORS.white, borderTopWidth: 1, borderColor: "#E5E0D6", flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingBottom: 10 },
+  bottomNav: { position: "absolute", left: 0, right: 0, bottom: 0, height: 94, backgroundColor: COLORS.white, borderTopWidth: 1, borderColor: "#E1E6E3", flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingBottom: 10 },
   navItem: { width: 60, alignItems: "center", justifyContent: "center", gap: 4 },
   navLabel: { color: "#9B9C95", fontSize: 10.5, fontWeight: "700" },
   navLabelActive: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900" },

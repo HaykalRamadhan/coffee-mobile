@@ -1,19 +1,32 @@
 {
   "expo": {
     "name": "KopiPow",
+    "owner": "lrxn",
     "slug": "kopipow",
     "scheme": "kopipow",
-    "version": "1.0.0",
+    "version": "1.1.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/e755f1c3-91d3-4ec2-8761-a87026a80704",
+      "checkAutomatically": "NEVER",
+      "fallbackToCacheTimeout": 0
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "backgroundColor": "#F6F1E7",
+    "backgroundColor": "#FFFFFF", 
     "androidNavigationBar": {
       "visible": "immersive",
       "barStyle": "dark-content",
-      "backgroundColor": "#EEEBCB"
+      "backgroundColor": "#FFFFFF"
     },
     "android": {
       "package": "com.kopipow.app",
+      "versionCode": 2,
+      "permissions": [
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#F36B35"
       }
@@ -24,6 +37,11 @@
     },
     "plugins": [
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e755f1c3-91d3-4ec2-8761-a87026a80704"
+      }
+    }
   }
 }

@@ -16,12 +16,12 @@ import { orderStatusLabel, type AccountOrder } from "../lib/orders";
 
 const COLORS = {
   ink: "#153F32",
-  cream: "#C9C7A7",
+  cream: "#DEE0DF",
   orange: "#D4A62A",
   yellow: "#E2B52F",
   green: "#204C3B",
   muted: "#526659",
-  white: "#EEEBCB",
+  white: "#FFFFFF",
 };
 
 type AuthMode = "signIn" | "signUp";
@@ -68,20 +68,25 @@ export function ProfileScreen({
     appUser,
     isAuthenticated,
     isInitializing,
+    isPasswordRecovery,
     isSupabaseConfigured,
     sendPasswordReset,
     session,
     signIn,
     signOut,
     signUp,
+    updatePassword,
     updateDisplayName,
   } = useAuth();
   const [mode, setMode] = useState<AuthMode>("signIn");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [profileName, setProfileName] = useState(appUser.displayName);
   const [showPassword, setShowPassword] = useState(false);
+  const [showRecoveryPassword, setShowRecoveryPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notice, setNotice] = useState<{ type: "error" | "success"; text: string } | null>(null);
 
@@ -141,6 +146,35 @@ export function ProfileScreen({
       });
     } catch {
       setNotice({ type: "error", text: "The recovery request failed unexpectedly. Please try again." });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const completePasswordReset = async () => {
+    if (newPassword.length < 6) {
+      setNotice({ type: "error", text: "Use at least 6 characters for your new password." });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setNotice({ type: "error", text: "The new passwords do not match." });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setNotice(null);
+    try {
+      const result = await updatePassword(newPassword);
+      setNotice({
+        type: result.error ? "error" : "success",
+        text: result.error ?? result.message ?? "Your password has been updated.",
+      });
+      if (!result.error) {
+        setNewPassword("");
+        setConfirmPassword("");
+      }
+    } catch {
+      setNotice({ type: "error", text: "The password update failed unexpectedly. Please try again." });
     } finally {
       setIsSubmitting(false);
     }
@@ -207,12 +241,14 @@ export function ProfileScreen({
       </View>
 
       <View style={styles.heading}>
-        <Text style={styles.eyebrow}>{isAuthenticated ? "YOUR KOPIPOW ACCOUNT" : "POWER UP YOUR EXPERIENCE"}</Text>
+        <Text style={styles.eyebrow}>{isPasswordRecovery ? "SECURE YOUR KOPIPOW ACCOUNT" : isAuthenticated ? "YOUR KOPIPOW ACCOUNT" : "POWER UP YOUR EXPERIENCE"}</Text>
         <Text style={styles.title} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.74}>
-          {isAuthenticated ? `Hi, ${appUser.displayName}!` : "Your Profile!"}
+          {isPasswordRecovery ? "Choose a new password!" : isAuthenticated ? `Hi, ${appUser.displayName}!` : "Your Profile!"}
         </Text>
         <Text style={styles.headingCopy}>
-          {isAuthenticated
+          {isPasswordRecovery
+            ? "Finish recovering your account with a new password."
+            : isAuthenticated
             ? "Keep your account details fresh and your future orders connected."
             : "Sign in to prepare for saved orders, rewards, and faster checkout."}
         </Text>
@@ -222,6 +258,79 @@ export function ProfileScreen({
         <View style={styles.loadingCard}>
           <ActivityIndicator size="large" color={COLORS.green} />
           <Text style={styles.loadingText}>Restoring your session…</Text>
+        </View>
+      ) : isPasswordRecovery ? (
+        <View style={styles.authCard}>
+          <Text style={styles.authTitle}>Reset your password</Text>
+          <Text style={styles.authSubtitle}>Enter and confirm the new password you want to use for KopiPow.</Text>
+
+          <Text style={styles.inputLabel}>NEW PASSWORD</Text>
+          <View style={styles.passwordField}>
+            <TextInput
+              value={newPassword}
+              onChangeText={setNewPassword}
+              placeholder="At least 6 characters"
+              placeholderTextColor="#858979"
+              selectionColor={COLORS.orange}
+              secureTextEntry={!showRecoveryPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              maxFontSizeMultiplier={1.2}
+              style={[styles.passwordInput, { fontSize: inputTextSize }]}
+              accessibilityLabel="New password"
+            />
+            <Pressable style={styles.passwordToggle} onPress={() => setShowRecoveryPassword((visible) => !visible)} accessibilityLabel={showRecoveryPassword ? "Hide new password" : "Show new password"}>
+              <Ionicons name={showRecoveryPassword ? "eye-off-outline" : "eye-outline"} size={21} color={COLORS.muted} />
+            </Pressable>
+          </View>
+
+          <Text style={styles.inputLabel}>CONFIRM NEW PASSWORD</Text>
+          <View style={styles.passwordField}>
+            <TextInput
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="Enter the new password again"
+              placeholderTextColor="#858979"
+              selectionColor={COLORS.orange}
+              secureTextEntry={!showRecoveryPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              maxFontSizeMultiplier={1.2}
+              style={[styles.passwordInput, { fontSize: inputTextSize }]}
+              accessibilityLabel="Confirm new password"
+            />
+          </View>
+
+          {notice && (
+            <View style={[styles.notice, notice.type === "error" ? styles.errorNotice : styles.successNotice]}>
+              <Ionicons name={notice.type === "error" ? "alert-circle-outline" : "checkmark-circle-outline"} size={18} color={notice.type === "error" ? "#8F382E" : COLORS.green} />
+              <Text style={[styles.noticeText, notice.type === "error" && styles.errorNoticeText]}>{notice.text}</Text>
+            </View>
+          )}
+
+          <Pressable
+            style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
+            onPress={completePasswordReset}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color={COLORS.white} />
+            ) : (
+              <>
+                <Text style={styles.primaryButtonText}>Update password</Text>
+                <Ionicons name="shield-checkmark-outline" size={19} color={COLORS.white} />
+              </>
+            )}
+          </Pressable>
+
+          <View style={styles.securityNote}>
+            <Ionicons name="lock-closed-outline" size={16} color={COLORS.muted} />
+            <Text style={styles.securityText}>Your new password is sent securely to Supabase and is never stored by KopiPow.</Text>
+          </View>
         </View>
       ) : isAuthenticated ? (
         <>
@@ -464,7 +573,7 @@ export function ProfileScreen({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.cream },
   content: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 124 },
-  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#BBB99A", borderRadius: 19, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 22 },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#F1F4F2", borderRadius: 19, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 22 },
   logoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoMark: { width: 38, height: 38, borderRadius: 13, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-4deg" }] },
   logoBolt: { color: COLORS.green, fontSize: 29, fontWeight: "900", lineHeight: 32 },
@@ -476,7 +585,7 @@ const styles = StyleSheet.create({
   statusDotOnline: { backgroundColor: COLORS.yellow },
   heading: { paddingTop: 24, paddingBottom: 24 },
   eyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 7 },
-  title: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 42, lineHeight: 45, letterSpacing: -1.5 },
+  title: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 42, lineHeight: 45, letterSpacing: -1.5, paddingBottom: 7, marginBottom: -7 },
   headingCopy: { color: COLORS.muted, fontSize: 11.5, lineHeight: 18, maxWidth: 330, marginTop: 10 },
   loadingCard: { minHeight: 210, borderRadius: 24, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", gap: 16 },
   loadingText: { color: COLORS.muted, fontSize: 11, fontWeight: "700" },
@@ -485,7 +594,7 @@ const styles = StyleSheet.create({
   setupCopy: { flex: 1 },
   setupTitle: { color: COLORS.ink, fontSize: 12, lineHeight: 17, fontWeight: "900" },
   setupText: { color: COLORS.green, fontSize: 8.5, lineHeight: 13, marginTop: 5 },
-  authCard: { backgroundColor: COLORS.white, borderRadius: 25, padding: 18, borderWidth: 1, borderColor: "#DCD7B7" },
+  authCard: { backgroundColor: COLORS.white, borderRadius: 25, padding: 18, borderWidth: 1, borderColor: "#DDE4DF" },
   modeSwitch: { flexDirection: "row", backgroundColor: COLORS.cream, borderRadius: 17, padding: 4, marginBottom: 22 },
   modeButton: { flex: 1, borderRadius: 14, alignItems: "center", paddingVertical: 10 },
   modeButtonActive: { backgroundColor: COLORS.green },
@@ -494,8 +603,8 @@ const styles = StyleSheet.create({
   authTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 25, fontWeight: "900" },
   authSubtitle: { color: COLORS.muted, fontSize: 9.5, lineHeight: 15, marginTop: 5, marginBottom: 20 },
   inputLabel: { color: COLORS.green, fontSize: 8, fontWeight: "900", letterSpacing: 1.15, marginBottom: 7, marginTop: 2 },
-  input: { minHeight: 50, borderRadius: 15, backgroundColor: "#DCD9B8", borderWidth: 1, borderColor: "#D1CDAA", color: COLORS.ink, fontWeight: "600", paddingHorizontal: 14, marginBottom: 15 },
-  passwordField: { minHeight: 50, borderRadius: 15, backgroundColor: "#DCD9B8", borderWidth: 1, borderColor: "#D1CDAA", flexDirection: "row", alignItems: "center", marginBottom: 7 },
+  input: { minHeight: 50, borderRadius: 15, backgroundColor: "#F3F5F4", borderWidth: 1, borderColor: "#DDE3DF", color: COLORS.ink, fontWeight: "600", paddingHorizontal: 14, marginBottom: 15 },
+  passwordField: { minHeight: 50, borderRadius: 15, backgroundColor: "#F3F5F4", borderWidth: 1, borderColor: "#DDE3DF", flexDirection: "row", alignItems: "center", marginBottom: 7 },
   passwordInput: { flex: 1, minWidth: 0, color: COLORS.ink, fontWeight: "600", paddingHorizontal: 14, paddingVertical: 12 },
   passwordToggle: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
   forgotButton: { alignSelf: "flex-end", paddingVertical: 7, paddingLeft: 12, marginBottom: 4 },
@@ -514,23 +623,23 @@ const styles = StyleSheet.create({
   identityAvatar: { width: 66, height: 66, borderRadius: 23, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginRight: 15, transform: [{ rotate: "-3deg" }] },
   identityInitials: { color: COLORS.green, fontSize: 22, fontWeight: "900" },
   identityCopy: { flex: 1 },
-  identityName: { color: COLORS.white, fontFamily: "serif", fontStyle: "italic", fontSize: 20, fontWeight: "900" },
+  identityName: { color: COLORS.white, fontFamily: "serif", fontStyle: "italic", fontSize: 20, fontWeight: "900", paddingBottom: 4, marginBottom: -4 },
   identityEmail: { color: "#C8D2C7", fontSize: 8.5, marginTop: 3 },
   verifiedPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: COLORS.yellow, borderRadius: 12, paddingHorizontal: 9, paddingVertical: 5, marginTop: 9 },
   verifiedText: { color: COLORS.green, fontSize: 7.5, fontWeight: "900" },
-  ordersCard: { backgroundColor: COLORS.white, borderRadius: 24, padding: 17, marginBottom: 14, borderWidth: 1, borderColor: "#DCD7B7" },
+  ordersCard: { backgroundColor: COLORS.white, borderRadius: 24, padding: 17, marginBottom: 14, borderWidth: 1, borderColor: "#DDE4DF" },
   ordersHeadingRow: { flexDirection: "row", alignItems: "center" },
   ordersIcon: { width: 43, height: 43, borderRadius: 14, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginRight: 11 },
   ordersHeadingCopy: { flex: 1 },
   ordersTitle: { color: COLORS.ink, fontSize: 13, fontWeight: "900" },
   ordersSubtitle: { color: COLORS.muted, fontSize: 8, lineHeight: 12, marginTop: 3 },
-  ordersStateRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#DCD9B8", borderRadius: 14, padding: 12, marginTop: 14 },
+  ordersStateRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#F3F5F4", borderRadius: 14, padding: 12, marginTop: 14 },
   ordersStateText: { color: COLORS.muted, fontSize: 8.5, fontWeight: "700" },
   ordersErrorRow: { backgroundColor: "#ECD1C8" },
   ordersErrorText: { color: "#8F382E", fontSize: 8.5, fontWeight: "700" },
   profileOrderList: { marginTop: 12 },
-  profileOrderRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "#E0DCBC" },
-  profileOrderCode: { width: 38, height: 34, borderRadius: 11, backgroundColor: "#DCD9B8", alignItems: "center", justifyContent: "center", marginRight: 9 },
+  profileOrderRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "#E1E6E3" },
+  profileOrderCode: { width: 38, height: 34, borderRadius: 11, backgroundColor: "#F3F5F4", alignItems: "center", justifyContent: "center", marginRight: 9 },
   profileOrderCodeText: { color: COLORS.green, fontSize: 7.5, fontWeight: "900", letterSpacing: 0.5 },
   profileOrderCopy: { flex: 1 },
   profileOrderTitle: { color: COLORS.ink, fontSize: 9.5, fontWeight: "900" },
@@ -539,11 +648,11 @@ const styles = StyleSheet.create({
   moreOrdersText: { color: COLORS.orange, fontSize: 8, fontWeight: "900", textAlign: "center", marginTop: 8 },
   formCard: { backgroundColor: COLORS.white, borderRadius: 24, padding: 18, marginBottom: 14 },
   formTitleRow: { flexDirection: "row", alignItems: "center", marginBottom: 20 },
-  formIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#DCD9B8", alignItems: "center", justifyContent: "center", marginRight: 11 },
+  formIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#F3F5F4", alignItems: "center", justifyContent: "center", marginRight: 11 },
   formTitleCopy: { flex: 1 },
   formTitle: { color: COLORS.ink, fontSize: 13, fontWeight: "900" },
   formSubtitle: { color: COLORS.muted, fontSize: 8, lineHeight: 12, marginTop: 3 },
-  accountCard: { backgroundColor: "#BBB99A", borderRadius: 21, padding: 16 },
+  accountCard: { backgroundColor: "#F1F4F2", borderRadius: 21, padding: 16 },
   accountTitle: { color: COLORS.ink, fontSize: 11.5, fontWeight: "900" },
   accountCopy: { color: COLORS.muted, fontSize: 8, lineHeight: 12, marginTop: 4 },
   signOutButton: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: COLORS.white, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 10, marginTop: 14 },

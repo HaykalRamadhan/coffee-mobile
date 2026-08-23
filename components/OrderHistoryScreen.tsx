@@ -12,12 +12,12 @@ import { orderStatusLabel, type AccountOrder, type OrderStatus } from "../lib/or
 
 const COLORS = {
   ink: "#153F32",
-  cream: "#C9C7A7",
+  cream: "#DEE0DF",
   orange: "#D4A62A",
   yellow: "#E2B52F",
   green: "#204C3B",
   muted: "#526659",
-  white: "#EEEBCB",
+  white: "#FFFFFF",
 };
 
 const statusColors: Record<OrderStatus, { background: string; foreground: string }> = {
@@ -25,7 +25,7 @@ const statusColors: Record<OrderStatus, { background: string; foreground: string
   confirmed: { background: "#BFD1B7", foreground: COLORS.green },
   preparing: { background: "#E6B178", foreground: "#6D361D" },
   ready: { background: COLORS.green, foreground: COLORS.white },
-  completed: { background: "#D5D3B7", foreground: COLORS.muted },
+  completed: { background: "#E6EAE7", foreground: COLORS.muted },
   cancelled: { background: "#E8C7C0", foreground: "#963A31" },
 };
 
@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
   browseButton: { backgroundColor: COLORS.green, borderRadius: 18, paddingHorizontal: 21, paddingVertical: 14, marginTop: 20 },
   browseText: { color: COLORS.white, fontSize: 11.5, fontWeight: "900" },
   orderList: { gap: 16 },
-  orderCard: { backgroundColor: COLORS.white, borderRadius: 27, padding: 22, borderWidth: 1, borderColor: "#DCD7B7" },
+  orderCard: { backgroundColor: COLORS.white, borderRadius: 27, padding: 22, borderWidth: 1, borderColor: "#DDE4DF" },
   orderTopRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
   orderCodeLabel: { color: COLORS.ink, fontSize: 16, fontWeight: "900", letterSpacing: 0.6 },
   orderDate: { color: COLORS.muted, fontSize: 13.5, marginTop: 7 },
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   itemExtra: { color: COLORS.orange, fontSize: 13.5, lineHeight: 20, fontWeight: "800", marginTop: 4 },
   itemNote: { color: COLORS.orange, fontSize: 13, lineHeight: 19, fontStyle: "italic", marginTop: 5 },
   itemPrice: { color: COLORS.ink, fontSize: 15, fontWeight: "800", marginLeft: 12 },
-  divider: { height: 1, backgroundColor: "#D7D3B2", marginVertical: 17 },
+  divider: { height: 1, backgroundColor: "#E1E6E3", marginVertical: 17 },
   orderBottomRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   pickupRow: { flexDirection: "row", alignItems: "center", gap: 9 },
   pickupText: { color: COLORS.muted, fontSize: 14, fontWeight: "700" },

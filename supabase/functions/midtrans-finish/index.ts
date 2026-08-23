@@ -1,35 +1,67 @@
-const html = (orderId: string) => `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;" />
-    <title>KopiPow payment</title>
-    <style>
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #c9c7a7; color: #153f32; font-family: system-ui, sans-serif; }
-      main { width: min(82vw, 420px); padding: 32px; border-radius: 28px; background: #eeebcb; text-align: center; }
-      h1 { margin: 10px 0; font-family: Georgia, serif; font-style: italic; font-size: 36px; }
-      p { line-height: 1.5; color: #526659; }
-      a { display: block; margin-top: 22px; padding: 16px; border-radius: 18px; background: #204c3b; color: #eeebcb; text-decoration: none; font-weight: 800; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <div>⚡</div>
-      <h1>Payment received!</h1>
-      <p>Return to KopiPow so we can verify the latest payment status.</p>
-      <a href="kopipow://payment/complete?order_id=${orderId}">Return to KopiPow</a>
-    </main>
-  </body>
-</html>`;
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { synchronizeMidtransStatus } from "../_shared/midtrans.ts";
 
-Deno.serve((request) => {
-  const orderId = new URL(request.url).searchParams.get("order_id") ?? "";
-  const safeOrderId = /^[0-9a-f-]{36}$/i.test(orderId) ? orderId : "";
-  return new Response(html(safeOrderId), {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PROVIDER_ORDER_PATTERN = /^KOPIPOW-[0-9a-f-]{36}$/i;
+
+type CallbackPaymentStatus = "pending" | "paid" | "failed" | "expired" | "refunded";
+
+const redirectToApp = (orderId: string | null, paymentStatus: CallbackPaymentStatus | null) => {
+  const params = new URLSearchParams();
+  if (orderId) params.set("order_id", orderId);
+  if (paymentStatus) params.set("payment_status", paymentStatus);
+
+  return new Response(null, {
+    status: 302,
     headers: {
-      "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
+      Location: `kopipow://payment/complete?${params.toString()}`,
     },
   });
+};
+
+Deno.serve(async (request) => {
+  const url = new URL(request.url);
+  const kopipowOrderId = url.searchParams.get("kopipow_order_id") ?? "";
+  const callbackOrderId = url.searchParams.get("order_id") ?? "";
+
+  try {
+    const serviceClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      { auth: { persistSession: false } },
+    );
+
+    let attemptQuery = serviceClient
+      .from("payment_attempts")
+      .select("order_id, provider_order_id")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (PROVIDER_ORDER_PATTERN.test(callbackOrderId)) {
+      attemptQuery = attemptQuery.eq("provider_order_id", callbackOrderId);
+    } else {
+      const internalOrderId = UUID_PATTERN.test(kopipowOrderId)
+        ? kopipowOrderId
+        : UUID_PATTERN.test(callbackOrderId)
+          ? callbackOrderId
+          : null;
+      if (!internalOrderId) return redirectToApp(null, null);
+      attemptQuery = attemptQuery.eq("order_id", internalOrderId);
+    }
+
+    const { data: attempt, error } = await attemptQuery.maybeSingle();
+    if (error) throw error;
+    if (!attempt) return redirectToApp(null, null);
+
+    const result = await synchronizeMidtransStatus(serviceClient, attempt.provider_order_id);
+    return redirectToApp(
+      attempt.order_id,
+      result?.paymentStatus as CallbackPaymentStatus | null ?? null,
+    );
+  } catch {
+    // The authenticated app check and Midtrans webhook remain independent
+    // recovery paths. Do not expose provider or database errors publicly.
+    return redirectToApp(null, null);
+  }
 });

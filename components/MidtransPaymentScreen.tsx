@@ -14,29 +14,39 @@ import {
   paymentGateway,
   type OnlinePaymentStatus,
 } from "../lib/payments";
+import {
+  clearPaymentCheckpoint,
+  isTerminalPaymentStatus,
+  savePaymentCheckpoint,
+  type PaymentCheckpointPhase,
+} from "../lib/paymentRecovery";
 
 const COLORS = {
   ink: "#153F32",
-  cream: "#C9C7A7",
+  cream: "#DEE0DF",
   orange: "#D4A62A",
   yellow: "#E2B52F",
   green: "#204C3B",
   muted: "#526659",
-  white: "#EEEBCB",
+  white: "#FFFFFF",
 };
 
 const formatRupiah = (amount: number) => `Rp ${amount.toLocaleString("id-ID")}`;
 
 type MidtransPaymentScreenProps = {
   orderId: string;
+  userId: string;
   total: number;
+  networkAvailable: boolean;
   onBack: () => void;
   onPaymentUpdated: () => void;
 };
 
 export function MidtransPaymentScreen({
   orderId,
+  userId,
   total,
+  networkAvailable,
   onBack,
   onPaymentUpdated,
 }: MidtransPaymentScreenProps) {
@@ -48,21 +58,42 @@ export function MidtransPaymentScreen({
   const [error, setError] = useState<string | null>(null);
   const started = useRef(false);
   const wasBackgrounded = useRef(false);
+  const wasOffline = useRef(false);
+  const appState = useRef(AppState.currentState);
   const syncInFlight = useRef<Promise<OnlinePaymentStatus | null> | null>(null);
   const closeAfterSync = useRef(false);
+
+  const saveCheckpoint = (
+    phase: PaymentCheckpointPhase,
+    lastKnownStatus: OnlinePaymentStatus = paymentStatus,
+  ) => savePaymentCheckpoint({ orderId, userId, total, phase, lastKnownStatus });
 
   const startPayment = async () => {
     setIsLoading(true);
     setError(null);
     setTransactionStatus(null);
+    if (!networkAvailable || appState.current !== "active") {
+      await saveCheckpoint("paused", "pending").catch(() => undefined);
+      setError("Connection paused. Your payment progress is saved and will resume when you reconnect.");
+      setIsLoading(false);
+      return;
+    }
+
+    await saveCheckpoint("preparing", "pending").catch(() => undefined);
     const result = await paymentGateway.createSession(orderId);
     if (result.error || !result.data) {
+      await saveCheckpoint("paused", "pending").catch(() => undefined);
       setError(result.error ?? "The secure payment page could not be opened.");
       setIsLoading(false);
       return;
     }
 
     setPaymentStatus(result.data.paymentStatus);
+    if (isTerminalPaymentStatus(result.data.paymentStatus)) {
+      await clearPaymentCheckpoint(orderId).catch(() => undefined);
+    } else {
+      await saveCheckpoint("awaiting_confirmation", result.data.paymentStatus).catch(() => undefined);
+    }
     setPaymentUrl(result.data.paymentUrl);
     setIsLoading(false);
   };
@@ -70,19 +101,31 @@ export function MidtransPaymentScreen({
   const synchronizePayment = async (closeWhenPending: boolean) => {
     closeAfterSync.current = closeAfterSync.current || closeWhenPending;
     if (syncInFlight.current) return syncInFlight.current;
+    if (!networkAvailable || appState.current !== "active") {
+      await saveCheckpoint("paused").catch(() => undefined);
+      setError("Connection paused. Your payment progress is saved and verification will resume automatically.");
+      return null;
+    }
 
     setIsChecking(true);
     setError(null);
+    await saveCheckpoint("verifying").catch(() => undefined);
     const request = (async () => {
       const result = await paymentGateway.synchronizeStatus(orderId);
 
       if (result.error || !result.data) {
+        await saveCheckpoint("paused").catch(() => undefined);
         setError(result.error ?? "The latest payment status could not be checked.");
         return null;
       }
 
       setPaymentStatus(result.data.paymentStatus);
       setTransactionStatus(result.data.transactionStatus);
+      if (isTerminalPaymentStatus(result.data.paymentStatus)) {
+        await clearPaymentCheckpoint(orderId).catch(() => undefined);
+      } else {
+        await saveCheckpoint("awaiting_confirmation", result.data.paymentStatus).catch(() => undefined);
+      }
       onPaymentUpdated();
       if (closeAfterSync.current || result.data.paymentStatus !== "pending") setPaymentUrl(null);
       return result.data.paymentStatus;
@@ -104,21 +147,58 @@ export function MidtransPaymentScreen({
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
+      appState.current = state;
       if (state !== "active") {
         wasBackgrounded.current = true;
+        if (!isTerminalPaymentStatus(paymentStatus)) {
+          void saveCheckpoint("paused").catch(() => undefined);
+        }
         return;
       }
-      if (wasBackgrounded.current && paymentUrl) {
+      if (wasBackgrounded.current && networkAvailable && paymentStatus === "pending") {
         wasBackgrounded.current = false;
         void synchronizePayment(false);
       }
     });
     return () => subscription.remove();
-  }, [paymentUrl, isChecking]);
+  }, [networkAvailable, paymentStatus]);
+
+  useEffect(() => {
+    if (!networkAvailable) {
+      wasOffline.current = true;
+      if (!isTerminalPaymentStatus(paymentStatus)) {
+        void saveCheckpoint("paused").catch(() => undefined);
+        setError("Connection paused. Your payment progress is saved and verification will resume automatically.");
+      }
+      return;
+    }
+
+    if (wasOffline.current && appState.current === "active" && paymentStatus === "pending") {
+      wasOffline.current = false;
+      void synchronizePayment(false);
+    }
+  }, [networkAvailable, paymentStatus]);
 
   const handleNavigation = (url: string) => {
-    if (url.includes("/functions/v1/midtrans-finish") || url.startsWith("kopipow://payment/complete")) {
-      void synchronizePayment(true);
+    // Let the server finish page load so it can verify Midtrans and persist the
+    // payment even when the app-side status request or dashboard webhook is
+    // delayed. The page then links back through the app scheme below.
+    if (url.includes("/functions/v1/midtrans-finish")) return true;
+
+    if (url.startsWith("kopipow://payment/complete")) {
+      const callbackStatus = new URL(url).searchParams.get("payment_status") as OnlinePaymentStatus | null;
+      if (callbackStatus && ["pending", "paid", "failed", "expired", "refunded"].includes(callbackStatus)) {
+        setPaymentStatus(callbackStatus);
+        setPaymentUrl(null);
+        if (isTerminalPaymentStatus(callbackStatus)) {
+          void clearPaymentCheckpoint(orderId).catch(() => undefined);
+        } else {
+          void saveCheckpoint("awaiting_confirmation", callbackStatus).catch(() => undefined);
+        }
+        onPaymentUpdated();
+      } else {
+        void synchronizePayment(true);
+      }
       return false;
     }
 
@@ -178,7 +258,7 @@ export function MidtransPaymentScreen({
         </View>
         {error && <Text style={styles.errorText}>{error}</Text>}
         {canRetryOpening && (
-          <Pressable style={styles.primaryButton} onPress={() => { void startPayment(); }}>
+          <Pressable style={[styles.primaryButton, !networkAvailable && styles.primaryButtonDisabled]} disabled={!networkAvailable} onPress={() => { void startPayment(); }}>
             <Text style={styles.primaryButtonText}>Open secure payment</Text>
           </Pressable>
         )}
@@ -216,7 +296,10 @@ export function MidtransPaymentScreen({
         cacheEnabled={false}
         setSupportMultipleWindows={false}
         onShouldStartLoadWithRequest={(navigation) => handleNavigation(navigation.url)}
-        onError={() => setError("The Midtrans payment page lost its connection. You can retry safely.")}
+        onError={() => {
+          void saveCheckpoint("paused").catch(() => undefined);
+          setError("Connection paused. Your payment progress is saved and will resume when you reconnect.");
+        }}
         startInLoadingState
         renderLoading={() => (
           <View style={styles.webLoading}>
@@ -239,14 +322,14 @@ export function MidtransPaymentScreen({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.cream },
-  header: { minHeight: 68, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: "#D4D0AE" },
-  closeButton: { width: 42, height: 42, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#D9D6B5", marginRight: 12 },
+  header: { minHeight: 68, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: "#DDE3DF" },
+  closeButton: { width: 42, height: 42, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "#E8EDE9", marginRight: 12 },
   headerCopy: { flex: 1 },
   headerTitle: { color: COLORS.ink, fontSize: 16, fontWeight: "900" },
   headerSubtitle: { color: COLORS.muted, fontSize: 11, marginTop: 2 },
   webView: { flex: 1, backgroundColor: COLORS.white },
   webLoading: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.white },
-  statusBar: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 16, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: "#D4D0AE" },
+  statusBar: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 16, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: "#DDE3DF" },
   statusText: { flex: 1, color: COLORS.green, fontSize: 11, fontWeight: "700" },
   errorStatusText: { color: "#963A31" },
   centeredScreen: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.cream, paddingHorizontal: 28 },
@@ -255,7 +338,7 @@ const styles = StyleSheet.create({
   resultScreen: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.cream, paddingHorizontal: 27 },
   resultIcon: { width: 105, height: 105, borderRadius: 35, alignItems: "center", justifyContent: "center", marginBottom: 22 },
   resultIconPaid: { backgroundColor: COLORS.yellow },
-  resultIconPending: { backgroundColor: "#D9D6B5" },
+  resultIconPending: { backgroundColor: "#E8EDE9" },
   resultIconFailed: { backgroundColor: "#E8C7C0" },
   eyebrow: { color: COLORS.orange, fontSize: 11, fontWeight: "900", letterSpacing: 1.3 },
   resultTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 30, fontWeight: "900", textAlign: "center", marginTop: 8 },
@@ -265,6 +348,7 @@ const styles = StyleSheet.create({
   orderTotal: { color: COLORS.yellow, fontSize: 23, fontWeight: "900", marginTop: 7 },
   errorText: { color: "#963A31", fontSize: 11, lineHeight: 16, textAlign: "center", marginBottom: 12 },
   primaryButton: { width: "100%", maxWidth: 360, minHeight: 56, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.green, paddingHorizontal: 18 },
+  primaryButtonDisabled: { opacity: 0.45 },
   primaryButtonText: { color: COLORS.white, fontSize: 12, fontWeight: "900" },
   secondaryButton: { paddingHorizontal: 20, paddingVertical: 15, marginTop: 8 },
   secondaryButtonText: { color: COLORS.green, fontSize: 11, fontWeight: "900" },

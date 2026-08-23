@@ -53,6 +53,10 @@ const invokePaymentFunction = async <T>(name: string, orderId: string): Promise<
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const { data, error } = await supabase.functions.invoke(name, {
       body: { orderId },
+      // Payment calls are safe to retry and should not spin forever. Keep this
+      // timeout local so ordinary cart, order, and authentication requests are
+      // never aborted by payment-specific behavior.
+      timeout: 20_000,
     });
     if (!error) return { data: data as T, error: null };
 

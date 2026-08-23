@@ -1,4 +1,4 @@
-import type { Session } from "@supabase/supabase-js";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import {
   AppState,
   Linking,
@@ -40,12 +40,13 @@ const getUnexpectedAuthError = (error: unknown) => (
 );
 
 const restoreSessionFromCallback = async (url: string) => {
-  if (!supabase || !url.includes("auth/callback")) return;
+  if (!supabase || !url.includes("auth/callback")) return false;
 
   const fragment = url.split("#")[1] ?? "";
   const params = new URLSearchParams(fragment);
   const accessToken = params.get("access_token");
   const refreshToken = params.get("refresh_token");
+  const isPasswordRecovery = params.get("type") === "recovery";
 
   if (accessToken && refreshToken) {
     const { error } = await supabase.auth.setSession({
@@ -54,17 +55,22 @@ const restoreSessionFromCallback = async (url: string) => {
     });
     if (error) throw error;
   }
+
+  return isPasswordRecovery;
 };
 
-const runAuthRequest = async (request: () => Promise<AuthResult>): Promise<AuthResult> => {
+const runAuthRequest = async (
+  request: () => Promise<AuthResult>,
+  timeoutResult: AuthResult = {
+    error: "The account service is taking too long to respond. Check your connection and inbox before trying again.",
+  },
+): Promise<AuthResult> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   try {
     const timeout = new Promise<AuthResult>((resolve) => {
       timeoutId = setTimeout(() => {
-        resolve({
-          error: "The account service is taking too long to respond. Check your connection and inbox before trying again.",
-        });
+        resolve(timeoutResult);
       }, AUTH_REQUEST_TIMEOUT_MS);
     });
 
@@ -80,11 +86,13 @@ type AuthContextValue = {
   appUser: AppUser;
   isAuthenticated: boolean;
   isInitializing: boolean;
+  isPasswordRecovery: boolean;
   isSupabaseConfigured: boolean;
   session: Session | null;
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signUp: (displayName: string, email: string, password: string) => Promise<AuthResult>;
   sendPasswordReset: (email: string) => Promise<AuthResult>;
+  updatePassword: (password: string) => Promise<AuthResult>;
   signOut: () => Promise<AuthResult>;
   updateDisplayName: (displayName: string) => Promise<AuthResult>;
 };
@@ -128,6 +136,7 @@ const notConfiguredResult = (): AuthResult => ({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isInitializing, setIsInitializing] = useState(isSupabaseConfigured);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -151,10 +160,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isMounted) setIsInitializing(false);
       });
 
-    const { data: authListener } = client.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: authListener } = client.auth.onAuthStateChange((event: AuthChangeEvent, nextSession) => {
       if (!isMounted) return;
       setSupabaseSession(nextSession);
       setSession(nextSession);
+      if (event === "PASSWORD_RECOVERY") setIsPasswordRecovery(true);
       setIsInitializing(false);
     });
 
@@ -165,11 +175,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     const appStateListener = AppState.addEventListener("change", handleAppStateChange);
     const authLinkListener = Linking.addEventListener("url", ({ url }) => {
-      void restoreSessionFromCallback(url).catch(() => undefined);
+      void restoreSessionFromCallback(url)
+        .then((isRecovery) => {
+          if (isMounted && isRecovery) setIsPasswordRecovery(true);
+        })
+        .catch(() => undefined);
     });
 
     void Linking.getInitialURL().then((url) => {
-      if (url) return restoreSessionFromCallback(url);
+      if (url) {
+        return restoreSessionFromCallback(url).then((isRecovery) => {
+          if (isMounted && isRecovery) setIsPasswordRecovery(true);
+        });
+      }
       return undefined;
     }).catch(() => undefined);
 
@@ -190,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     appUser: getAppUser(session),
     isAuthenticated: Boolean(session),
     isInitializing,
+    isPasswordRecovery,
     isSupabaseConfigured,
     session,
     signIn: (email, password) => runAuthRequest(async () => {
@@ -221,14 +240,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : "Check your inbox to confirm your email, then sign in.",
       };
     }),
-    sendPasswordReset: (email) => runAuthRequest(async () => {
+    sendPasswordReset: (email) => runAuthRequest(
+      async () => {
+        if (!supabase) return notConfiguredResult();
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: authRedirectUrl,
+        });
+        return {
+          error: error?.message ?? null,
+          message: error ? undefined : "If that email is registered, a recovery message is on its way.",
+        };
+      },
+      {
+        error: null,
+        message: "Your request is still being delivered. If that email is registered, check its inbox and spam folder shortly.",
+      },
+    ),
+    updatePassword: (password) => runAuthRequest(async () => {
       if (!supabase) return notConfiguredResult();
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: authRedirectUrl,
-      });
+      const { error } = await supabase.auth.updateUser({ password });
+      if (!error) setIsPasswordRecovery(false);
       return {
         error: error?.message ?? null,
-        message: error ? undefined : "If that email is registered, a recovery message is on its way.",
+        message: error ? undefined : "Your password has been updated.",
       };
     }),
     signOut: () => runAuthRequest(async () => {
@@ -246,7 +280,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         message: error ? undefined : "Profile updated.",
       };
     }),
-  }), [isInitializing, session]);
+  }), [isInitializing, isPasswordRecovery, session]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

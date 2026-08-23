@@ -126,7 +126,9 @@ Deno.serve(async (request) => {
       });
     if (insertAttemptError) throw insertAttemptError;
 
-    const finishUrl = `${supabaseUrl}/functions/v1/midtrans-finish?order_id=${encodeURIComponent(order.id)}`;
+    // Keep KopiPow's UUID separate from Midtrans's own `order_id` callback
+    // parameter. Midtrans may append or replace `order_id` on the finish URL.
+    const finishUrl = `${supabaseUrl}/functions/v1/midtrans-finish?kopipow_order_id=${encodeURIComponent(order.id)}`;
     try {
       const snap = await createSnapTransaction({
         transaction_details: {
