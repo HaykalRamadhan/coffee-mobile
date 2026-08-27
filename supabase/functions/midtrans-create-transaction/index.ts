@@ -62,7 +62,7 @@ Deno.serve(async (request) => {
     if (order.status !== "pending") {
       return jsonResponse({ error: "Cancelled or closed orders cannot start another payment." }, 409);
     }
-    if (order.payment_status !== "pending") {
+    if (!["pending", "failed", "expired"].includes(order.payment_status)) {
       return jsonResponse({ error: "This order is not eligible for another payment." }, 409);
     }
     if (["paid", "refunded"].includes(order.payment_status)) {

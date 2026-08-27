@@ -4,6 +4,11 @@ KopiPow currently uses Midtrans Snap through the `PaymentGateway` interface in
 `lib/payments.ts`. The app opens the Midtrans-hosted `redirect_url` in a WebView;
 card and wallet credentials never pass through KopiPow's UI or database.
 
+Users can cancel an unpaid or pending payment from the secure payment screen.
+Cancellation calls the authenticated `midtrans-cancel-payment` Edge Function,
+which cancels the active Midtrans transaction and leaves the order retryable.
+Completed payments cannot be cancelled; they require a separate refund process.
+
 ## Sandbox setup
 
 1. In the Midtrans Dashboard, switch to **Sandbox** and open **Settings → Access Keys**.

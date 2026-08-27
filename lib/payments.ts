@@ -30,6 +30,7 @@ export type PaymentGateway = {
   id: "midtrans";
   createSession: (orderId: string) => Promise<PaymentResult<PaymentSession>>;
   synchronizeStatus: (orderId: string) => Promise<PaymentResult<PaymentStatusResult>>;
+  cancelPayment: (orderId: string) => Promise<PaymentResult<PaymentStatusResult>>;
 };
 
 const getFunctionError = async (error: unknown) => {
@@ -79,6 +80,10 @@ const midtransGateway: PaymentGateway = {
 
   async synchronizeStatus(orderId) {
     return invokePaymentFunction<PaymentStatusResult>("midtrans-sync-status", orderId);
+  },
+
+  async cancelPayment(orderId) {
+    return invokePaymentFunction<PaymentStatusResult>("midtrans-cancel-payment", orderId);
   },
 };
 

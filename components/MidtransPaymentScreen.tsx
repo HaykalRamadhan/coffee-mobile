@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Linking,
   Pressable,
@@ -57,6 +58,7 @@ export function MidtransPaymentScreen({
   const [transactionStatus, setTransactionStatus] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isChecking, setIsChecking] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const started = useRef(false);
   const wasBackgrounded = useRef(false);
@@ -218,6 +220,35 @@ export function MidtransPaymentScreen({
     onBack();
   };
 
+  const cancelPayment = async () => {
+    setIsCancelling(true);
+    setError(null);
+    const result = await paymentGateway.cancelPayment(orderId);
+    if (result.error || !result.data) {
+      setError(result.error ?? "The payment could not be cancelled.");
+      setIsCancelling(false);
+      return;
+    }
+
+    setPaymentStatus(result.data.paymentStatus);
+    setTransactionStatus(result.data.transactionStatus);
+    await clearPaymentCheckpoint(orderId).catch(() => undefined);
+    setPaymentUrl(null);
+    onPaymentUpdated();
+    setIsCancelling(false);
+  };
+
+  const confirmCancelPayment = () => {
+    Alert.alert(
+      "Cancel payment?",
+      "No charge will be made if Midtrans has not completed the payment.",
+      [
+        { text: "Keep paying", style: "cancel" },
+        { text: "Cancel payment", style: "destructive", onPress: () => { void cancelPayment(); } },
+      ],
+    );
+  };
+
   if (isLoading) {
     return (
       <View style={[styles.centeredScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
@@ -279,14 +310,16 @@ export function MidtransPaymentScreen({
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { minHeight: 68 + insets.top, paddingTop: insets.top }]}>
-        <Pressable style={styles.closeButton} onPress={() => { void exitPayment(); }} accessibilityLabel="Close payment">
+        <Pressable style={styles.closeButton} onPress={() => { void exitPayment(); }} accessibilityLabel="Close payment" disabled={isCancelling}>
           <Ionicons name="close" size={25} color={COLORS.green} />
         </Pressable>
         <View style={styles.headerCopy}>
           <Text style={styles.headerTitle}>Secure payment</Text>
           <Text style={styles.headerSubtitle}>Midtrans · {formatRupiah(total)}</Text>
         </View>
-        <Ionicons name="shield-checkmark-outline" size={25} color={COLORS.green} />
+        <Pressable onPress={confirmCancelPayment} disabled={isCancelling} accessibilityLabel="Cancel payment">
+          {isCancelling ? <ActivityIndicator size="small" color={COLORS.green} /> : <Text style={styles.cancelText}>Cancel</Text>}
+        </Pressable>
       </View>
 
       <WebView
@@ -334,6 +367,7 @@ const styles = StyleSheet.create({
   statusBar: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 16, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: "#DDE3DF" },
   statusText: { flex: 1, color: COLORS.green, fontSize: 11, fontWeight: "700" },
   errorStatusText: { color: "#963A31" },
+  cancelText: { color: "#963A31", fontSize: 11, fontWeight: "900" },
   centeredScreen: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.cream, paddingHorizontal: 28 },
   loadingTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 28, fontWeight: "900", marginTop: 20 },
   loadingCopy: { color: COLORS.muted, fontSize: 12, textAlign: "center", marginTop: 8 },

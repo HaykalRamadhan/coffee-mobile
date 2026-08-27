@@ -388,6 +388,9 @@ verify_jwt = true
 [functions.midtrans-sync-status]
 verify_jwt = true
 
+[functions.midtrans-cancel-payment]
+verify_jwt = true
+
 [functions.midtrans-webhook]
 verify_jwt = false
 

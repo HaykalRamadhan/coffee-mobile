@@ -113,6 +113,27 @@ export const cancelSnapSession = async (token: string) => {
   return data;
 };
 
+export const cancelMidtransTransaction = async (providerOrderId: string) => {
+  const config = getMidtransConfig();
+  const response = await midtransFetch(
+    `${config.apiBaseUrl}/v2/${encodeURIComponent(providerOrderId)}/cancel`,
+    config.serverKey,
+    { method: "POST" },
+  );
+  const data = await response.json() as MidtransTransactionStatus & {
+    error_messages?: string[];
+  };
+  const alreadyCancelled = data.error_messages?.some((message) => (
+    message.toLowerCase().includes("already canceled")
+  ));
+
+  if (!response.ok && !alreadyCancelled) {
+    throw new Error(data.status_message ?? data.error_messages?.[0] ?? `Midtrans returned HTTP ${response.status}.`);
+  }
+
+  return data;
+};
+
 export const getMidtransTransactionStatus = async (providerOrderId: string) => {
   const config = getMidtransConfig();
   const response = await midtransFetch(
@@ -193,7 +214,11 @@ export const synchronizeMidtransStatus = async (
   if (mapped.order === "paid") {
     orderUpdate.paid_at = now;
     if (["pending", "cancelled"].includes(orderData.status)) orderUpdate.status = "confirmed";
-  } else if (["failed", "expired"].includes(mapped.order) && orderData.status === "pending") {
+  } else if (
+    ["failed", "expired"].includes(mapped.order)
+    && mapped.attempt !== "cancelled"
+    && orderData.status === "pending"
+  ) {
     orderUpdate.status = "cancelled";
   }
 
