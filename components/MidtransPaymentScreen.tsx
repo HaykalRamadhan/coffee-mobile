@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   paymentGateway,
   type OnlinePaymentStatus,
@@ -50,6 +51,7 @@ export function MidtransPaymentScreen({
   onBack,
   onPaymentUpdated,
 }: MidtransPaymentScreenProps) {
+  const insets = useSafeAreaInsets();
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [paymentStatus, setPaymentStatus] = useState<OnlinePaymentStatus>("pending");
   const [transactionStatus, setTransactionStatus] = useState<string | null>(null);
@@ -218,7 +220,7 @@ export function MidtransPaymentScreen({
 
   if (isLoading) {
     return (
-      <View style={styles.centeredScreen}>
+      <View style={[styles.centeredScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <ActivityIndicator size="large" color={COLORS.green} />
         <Text style={styles.loadingTitle}>Preparing secure payment…</Text>
         <Text style={styles.loadingCopy}>KopiPow is connecting to Midtrans Sandbox.</Text>
@@ -233,7 +235,7 @@ export function MidtransPaymentScreen({
     const isClosedOrderError = Boolean(error && /cancelled|closed|not eligible/i.test(error));
     const canRetryOpening = Boolean(error) && isPending && !isClosedOrderError;
     return (
-      <View style={styles.resultScreen}>
+      <View style={[styles.resultScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={[styles.resultIcon, isPaid ? styles.resultIconPaid : isPending ? styles.resultIconPending : styles.resultIconFailed]}>
           <Ionicons
             name={isPaid ? "checkmark" : isPending ? "time-outline" : "alert-outline"}
@@ -276,7 +278,7 @@ export function MidtransPaymentScreen({
 
   return (
     <View style={styles.screen}>
-      <View style={styles.header}>
+      <View style={[styles.header, { minHeight: 68 + insets.top, paddingTop: insets.top }]}>
         <Pressable style={styles.closeButton} onPress={() => { void exitPayment(); }} accessibilityLabel="Close payment">
           <Ionicons name="close" size={25} color={COLORS.green} />
         </Pressable>
@@ -347,7 +349,7 @@ const styles = StyleSheet.create({
   orderLabel: { color: COLORS.white, fontSize: 11, fontWeight: "900", letterSpacing: 1 },
   orderTotal: { color: COLORS.yellow, fontSize: 23, fontWeight: "900", marginTop: 7 },
   errorText: { color: "#963A31", fontSize: 11, lineHeight: 16, textAlign: "center", marginBottom: 12 },
-  primaryButton: { width: "100%", maxWidth: 360, minHeight: 56, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.green, paddingHorizontal: 18 },
+  primaryButton: { width: "100%", maxWidth: 360, minHeight: 35, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.green, paddingHorizontal: 18 },
   primaryButtonDisabled: { opacity: 0.45 },
   primaryButtonText: { color: COLORS.white, fontSize: 12, fontWeight: "900" },
   secondaryButton: { paddingHorizontal: 20, paddingVertical: 15, marginTop: 8 },

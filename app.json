@@ -16,8 +16,12 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "backgroundColor": "#FFFFFF", 
+    "androidStatusBar": {
+      "barStyle": "dark-content",
+      "backgroundColor": "#00000000",
+      "translucent": true
+    },
     "androidNavigationBar": {
-      "visible": "immersive",
       "barStyle": "dark-content",
       "backgroundColor": "#FFFFFF"
     },
@@ -33,7 +37,10 @@
     },
     "ios": {
       "bundleIdentifier": "com.kopipow.app",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "plugins": [
       "expo-font"

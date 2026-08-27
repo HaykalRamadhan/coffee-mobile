@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
   type TextProps,
 } from "react-native";
 import { createContext, useContext, useEffect, useState, type ReactElement } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { orderStatusLabel, type AccountOrder } from "../lib/orders";
 
@@ -64,8 +66,10 @@ export function ProfileScreen({
   refreshControl,
   typographyScale,
 }: ProfileScreenProps) {
+  const insets = useSafeAreaInsets();
   const {
     appUser,
+    deleteAccount,
     isAuthenticated,
     isInitializing,
     isPasswordRecovery,
@@ -88,6 +92,10 @@ export function ProfileScreen({
   const [showPassword, setShowPassword] = useState(false);
   const [showRecoveryPassword, setShowRecoveryPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: "error" | "success"; text: string } | null>(null);
 
   useEffect(() => {
@@ -214,13 +222,43 @@ export function ProfileScreen({
     }
   };
 
+  const closeDeleteModal = () => {
+    if (isDeletingAccount) return;
+    setIsDeleteModalOpen(false);
+    setDeleteConfirmation("");
+    setDeleteError(null);
+  };
+
+  const confirmAccountDeletion = async () => {
+    if (deleteConfirmation.trim() !== "CONFIRM") return;
+
+    setIsDeletingAccount(true);
+    setDeleteError(null);
+    try {
+      const result = await deleteAccount();
+      if (result.error) {
+        setDeleteError(result.error);
+        return;
+      }
+      setIsDeleteModalOpen(false);
+      setDeleteConfirmation("");
+    } catch {
+      setDeleteError("Account deletion failed unexpectedly. Please try again.");
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
   const inputTextSize = 12.5 * typographyScale;
 
   return (
     <ProfileTypographyContext.Provider value={typographyScale}>
       <ScrollView
         style={styles.screen}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: 14 + insets.top, paddingBottom: 124 + insets.bottom },
+        ]}
         showsVerticalScrollIndicator={false}
         refreshControl={refreshControl}
         keyboardShouldPersistTaps="handled"
@@ -443,6 +481,21 @@ export function ProfileScreen({
               <Ionicons name="log-out-outline" size={20} color={COLORS.green} />
               <Text style={styles.signOutText}>Sign out</Text>
             </Pressable>
+            <View style={styles.dangerDivider} />
+            <Text style={styles.dangerTitle}>Delete your account</Text>
+            <Text style={styles.dangerCopy}>Permanently remove your KopiPow login, cart, and order history.</Text>
+            <Pressable
+              style={styles.deleteAccountButton}
+              onPress={() => {
+                setDeleteError(null);
+                setDeleteConfirmation("");
+                setIsDeleteModalOpen(true);
+              }}
+              disabled={isSubmitting}
+            >
+              <Ionicons name="trash-outline" size={19} color="#A43A32" />
+              <Text style={styles.deleteAccountText}>Delete account</Text>
+            </Pressable>
           </View>
         </>
       ) : (
@@ -566,6 +619,66 @@ export function ProfileScreen({
         </>
       )}
       </ScrollView>
+
+      <Modal
+        visible={isDeleteModalOpen}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeDeleteModal}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.deleteModal}>
+            <View style={styles.deleteModalIcon}>
+              <Ionicons name="warning-outline" size={28} color="#A43A32" />
+            </View>
+            <Text style={styles.deleteModalTitle}>Delete your account?</Text>
+            <Text style={styles.deleteModalCopy}>
+              This permanently deletes your account, saved cart, and order history. It cannot be undone. Accounts with an active order or payment cannot be deleted yet.
+            </Text>
+            <Text style={styles.deleteModalPrompt}>Type CONFIRM to continue</Text>
+            <TextInput
+              value={deleteConfirmation}
+              onChangeText={setDeleteConfirmation}
+              placeholder="CONFIRM"
+              placeholderTextColor="#92988F"
+              selectionColor="#A43A32"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={!isDeletingAccount}
+              style={styles.deleteConfirmationInput}
+              accessibilityLabel="Type CONFIRM to delete your account"
+            />
+            {deleteError && (
+              <View style={styles.deleteErrorNotice}>
+                <Ionicons name="alert-circle-outline" size={18} color="#8F382E" />
+                <Text style={styles.deleteErrorText}>{deleteError}</Text>
+              </View>
+            )}
+            <View style={styles.deleteModalActions}>
+              <Pressable
+                style={styles.cancelDeleteButton}
+                onPress={closeDeleteModal}
+                disabled={isDeletingAccount}
+              >
+                <Text style={styles.cancelDeleteText}>Keep account</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.confirmDeleteButton,
+                  (deleteConfirmation.trim() !== "CONFIRM" || isDeletingAccount) && styles.buttonDisabled,
+                ]}
+                onPress={confirmAccountDeletion}
+                disabled={deleteConfirmation.trim() !== "CONFIRM" || isDeletingAccount}
+              >
+                {isDeletingAccount
+                  ? <ActivityIndicator color={COLORS.white} />
+                  : <Text style={styles.confirmDeleteText}>Delete forever</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ProfileTypographyContext.Provider>
   );
 }
@@ -657,4 +770,23 @@ const styles = StyleSheet.create({
   accountCopy: { color: COLORS.muted, fontSize: 8, lineHeight: 12, marginTop: 4 },
   signOutButton: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: COLORS.white, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 10, marginTop: 14 },
   signOutText: { color: COLORS.green, fontSize: 9, fontWeight: "900" },
+  dangerDivider: { height: 1, backgroundColor: "#D8DEDA", marginVertical: 17 },
+  dangerTitle: { color: "#8F382E", fontSize: 11.5, fontWeight: "900" },
+  dangerCopy: { color: COLORS.muted, fontSize: 8, lineHeight: 12, marginTop: 4 },
+  deleteAccountButton: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: "#F4DCD7", borderRadius: 15, paddingHorizontal: 14, paddingVertical: 10, marginTop: 14 },
+  deleteAccountText: { color: "#A43A32", fontSize: 9, fontWeight: "900" },
+  modalBackdrop: { flex: 1, justifyContent: "center", paddingHorizontal: 24, backgroundColor: "rgba(8, 28, 22, 0.64)" },
+  deleteModal: { backgroundColor: COLORS.white, borderRadius: 25, padding: 22, borderWidth: 1, borderColor: "#E3D5D1" },
+  deleteModalIcon: { width: 52, height: 52, borderRadius: 17, backgroundColor: "#F4DCD7", alignItems: "center", justifyContent: "center", marginBottom: 16 },
+  deleteModalTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 25, lineHeight: 30 },
+  deleteModalCopy: { color: COLORS.muted, fontSize: 10, lineHeight: 16, marginTop: 9 },
+  deleteModalPrompt: { color: "#8F382E", fontSize: 9, fontWeight: "900", letterSpacing: 0.5, marginTop: 20, marginBottom: 8 },
+  deleteConfirmationInput: { minHeight: 50, borderRadius: 15, backgroundColor: "#F7F3F2", borderWidth: 1, borderColor: "#D8BDB7", color: COLORS.ink, fontSize: 14, fontWeight: "900", letterSpacing: 1.5, paddingHorizontal: 14 },
+  deleteErrorNotice: { flexDirection: "row", alignItems: "flex-start", gap: 8, borderRadius: 14, padding: 11, backgroundColor: "#ECD1C8", marginTop: 12 },
+  deleteErrorText: { flex: 1, color: "#8F382E", fontSize: 8.5, lineHeight: 13, fontWeight: "700" },
+  deleteModalActions: { flexDirection: "row", gap: 10, marginTop: 18 },
+  cancelDeleteButton: { flex: 1, minHeight: 48, borderRadius: 16, backgroundColor: "#EEF1EF", alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
+  cancelDeleteText: { color: COLORS.green, fontSize: 9, fontWeight: "900" },
+  confirmDeleteButton: { flex: 1, minHeight: 48, borderRadius: 16, backgroundColor: "#A43A32", alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
+  confirmDeleteText: { color: COLORS.white, fontSize: 9, fontWeight: "900" },
 });

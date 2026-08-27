@@ -8,7 +8,10 @@ import {
   Text,
   View,
 } from "react-native";
+import { useState } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { orderStatusLabel, type AccountOrder, type OrderStatus } from "../lib/orders";
+import { getOrderItemDisplayDetails } from "../lib/orderDetails";
 
 const COLORS = {
   ink: "#153F32",
@@ -39,27 +42,6 @@ const formatOrderDate = (createdAt: string) => new Date(createdAt).toLocaleStrin
   minute: "2-digit",
 });
 
-const getCustomizationLines = (customization: Record<string, unknown> | null) => {
-  if (!customization) return [];
-
-  const size = typeof customization.size === "string" ? customization.size : null;
-  const temperature = typeof customization.temperature === "string" ? customization.temperature : null;
-  const sugar = typeof customization.sugar === "string" ? `${customization.sugar} sugar` : null;
-  const milk = typeof customization.milk === "string" ? customization.milk : null;
-  const ice = typeof customization.ice === "string" ? customization.ice : null;
-  const extras = Array.isArray(customization.extras)
-    ? customization.extras.filter((value): value is string => typeof value === "string")
-    : [];
-
-  const lines = [
-    [size, temperature, sugar].filter(Boolean).join(" · "),
-    [milk, ice].filter(Boolean).join(" · "),
-  ].filter(Boolean);
-
-  if (extras.length > 0) lines.push(`+ ${extras.join(", ")}`);
-  return lines;
-};
-
 type OrderHistoryScreenProps = {
   error: string | null;
   isLoading: boolean;
@@ -79,21 +61,43 @@ export function OrderHistoryScreen({
   onBrowseMenu,
   onContinuePayment,
 }: OrderHistoryScreenProps) {
+  const insets = useSafeAreaInsets();
+  const [showFloatingBack, setShowFloatingBack] = useState(false);
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(() => new Set());
+
+  const toggleOrderDetails = (orderId: string) => {
+    setExpandedOrderIds((current) => {
+      const next = new Set(current);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      refreshControl={(
-        <RefreshControl
-          refreshing={isLoading}
-          onRefresh={onRefresh}
-          colors={[COLORS.green]}
-          progressBackgroundColor={COLORS.white}
-          tintColor={COLORS.green}
-        />
-      )}
-    >
+    <View style={styles.screen}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: 18 + insets.top, paddingBottom: 52 + insets.bottom },
+        ]}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={({ nativeEvent }) => {
+          const shouldShow = nativeEvent.contentOffset.y > 72;
+          if (shouldShow !== showFloatingBack) setShowFloatingBack(shouldShow);
+        }}
+        refreshControl={(
+          <RefreshControl
+            refreshing={isLoading}
+            onRefresh={onRefresh}
+            colors={[COLORS.green]}
+            progressBackgroundColor={COLORS.white}
+            tintColor={COLORS.green}
+          />
+        )}
+      >
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={onBack} accessibilityLabel="Go back">
           <Ionicons name="arrow-back" size={28} color={COLORS.green} />
@@ -136,32 +140,64 @@ export function OrderHistoryScreen({
             const statusLabel = order.paymentMethod === "midtrans_snap" && order.paymentStatus === "pending"
               ? "Payment pending"
               : orderStatusLabel[order.status];
+            const isExpanded = expandedOrderIds.has(order.id);
+            const firstItemName = order.items[0]?.productName ?? "Order details";
 
             return (
-              <View key={order.id} style={styles.orderCard}>
+              <Pressable
+                key={order.id}
+                style={({ pressed }) => [styles.orderCard, pressed && styles.orderCardPressed]}
+                onPress={() => toggleOrderDetails(order.id)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: isExpanded }}
+                accessibilityLabel={`${isExpanded ? "Hide" : "Show"} details for order ${order.id.slice(0, 8).toUpperCase()}`}
+              >
                 <View style={styles.orderTopRow}>
                   <View>
                     <Text style={styles.orderCodeLabel}>ORDER #{order.id.slice(0, 8).toUpperCase()}</Text>
                     <Text style={styles.orderDate}>{formatOrderDate(order.createdAt)}</Text>
                   </View>
-                  <View style={[styles.statusPill, { backgroundColor: statusColor.background }]}>
-                    <Text style={[styles.statusText, { color: statusColor.foreground }]}>{statusLabel}</Text>
+                  <View style={styles.orderTopActions}>
+                    <View style={[styles.statusPill, { backgroundColor: statusColor.background }]}>
+                      <Text style={[styles.statusText, { color: statusColor.foreground }]}>{statusLabel}</Text>
+                    </View>
+                    <View style={styles.expandButton}>
+                      <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color={COLORS.green} />
+                    </View>
                   </View>
                 </View>
 
+                {!isExpanded && (
+                  <View style={styles.collapsedSummary}>
+                    <View style={styles.collapsedSummaryCopy}>
+                      <Text style={styles.collapsedItemName} numberOfLines={1}>{firstItemName}</Text>
+                      <Text style={styles.collapsedItemCount}>
+                        {itemCount} {itemCount === 1 ? "item" : "items"} · Tap to view details
+                      </Text>
+                    </View>
+                    <Text style={styles.collapsedTotal}>{formatRupiah(order.total)}</Text>
+                  </View>
+                )}
+
+                {isExpanded && <>
                 <View style={styles.itemList}>
                   {order.items.map((item) => {
-                    const customizationLines = getCustomizationLines(item.customization);
+                    const details = getOrderItemDisplayDetails(item.customization);
                     return (
                       <View key={item.id} style={styles.itemRow}>
                         <Text style={styles.itemQuantity}>{item.quantity}×</Text>
                         <View style={styles.itemCopy}>
                           <Text style={styles.itemName}>{item.productName}</Text>
-                          {customizationLines.map((line, index) => (
-                            <Text key={`${item.id}-customization-${index}`} style={index === customizationLines.length - 1 && line.startsWith("+") ? styles.itemExtra : styles.itemDetail}>
-                              {line}
-                            </Text>
-                          ))}
+                          {details.primary && <Text style={styles.itemDetail}>{details.primary}</Text>}
+                          {details.secondary && <Text style={styles.itemDetail}>{details.secondary}</Text>}
+                          {details.extras.length > 0 && (
+                            <>
+                              <Text style={styles.itemExtrasLabel}>Extras:</Text>
+                              {details.extras.map((extra, index) => (
+                                <Text key={`${item.id}-extra-${index}`} style={styles.itemExtra}>- {extra}</Text>
+                              ))}
+                            </>
+                          )}
                           {item.note.length > 0 && <Text style={styles.itemNote}>“{item.note}”</Text>}
                         </View>
                         <Text style={styles.itemPrice}>{formatRupiah(item.unitPrice * item.quantity)}</Text>
@@ -191,22 +227,41 @@ export function OrderHistoryScreen({
                         : "Online payment not completed"}
                 </Text>
                 {canContinuePayment && (
-                  <Pressable style={styles.continuePaymentButton} onPress={() => onContinuePayment(order)}>
+                  <Pressable
+                    style={styles.continuePaymentButton}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      onContinuePayment(order);
+                    }}
+                  >
                     <Ionicons name="card-outline" size={19} color={COLORS.white} />
                     <Text style={styles.continuePaymentText}>Continue payment</Text>
                   </Pressable>
                 )}
-              </View>
+                </>}
+              </Pressable>
             );
           })}
         </View>
       )}
-    </ScrollView>
+      </ScrollView>
+
+      {showFloatingBack && (
+        <Pressable
+          style={styles.floatingBackButton}
+          onPress={onBack}
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={25} color={COLORS.green} />
+        </Pressable>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.cream },
+  scrollView: { flex: 1 },
   content: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 52 },
   header: { flexDirection: "row", alignItems: "center" },
   backButton: { width: 56, height: 56, borderRadius: 19, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", marginRight: 16 },
@@ -229,18 +284,27 @@ const styles = StyleSheet.create({
   browseText: { color: COLORS.white, fontSize: 11.5, fontWeight: "900" },
   orderList: { gap: 16 },
   orderCard: { backgroundColor: COLORS.white, borderRadius: 27, padding: 22, borderWidth: 1, borderColor: "#DDE4DF" },
+  orderCardPressed: { opacity: 0.92 },
   orderTopRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  orderTopActions: { flexDirection: "row", alignItems: "center", gap: 9 },
   orderCodeLabel: { color: COLORS.ink, fontSize: 16, fontWeight: "900", letterSpacing: 0.6 },
   orderDate: { color: COLORS.muted, fontSize: 13.5, marginTop: 7 },
   statusPill: { borderRadius: 17, paddingHorizontal: 15, paddingVertical: 11 },
   statusText: { fontSize: 13, fontWeight: "900" },
+  expandButton: { width: 38, height: 38, borderRadius: 14, backgroundColor: "#EEF1EF", alignItems: "center", justifyContent: "center" },
+  collapsedSummary: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 14, marginTop: 21, paddingTop: 17, borderTopWidth: 1, borderTopColor: "#E1E6E3" },
+  collapsedSummaryCopy: { flex: 1 },
+  collapsedItemName: { color: COLORS.ink, fontSize: 16, fontWeight: "800" },
+  collapsedItemCount: { color: COLORS.muted, fontSize: 12.5, marginTop: 5 },
+  collapsedTotal: { color: COLORS.orange, fontSize: 18, fontWeight: "900" },
   itemList: { marginTop: 21 },
   itemRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 12 },
   itemQuantity: { width: 40, color: COLORS.orange, fontSize: 16, fontWeight: "900" },
   itemCopy: { flex: 1 },
   itemName: { color: COLORS.ink, fontSize: 17, fontWeight: "800" },
   itemDetail: { color: COLORS.muted, fontSize: 14, lineHeight: 20, marginTop: 4 },
-  itemExtra: { color: COLORS.orange, fontSize: 13.5, lineHeight: 20, fontWeight: "800", marginTop: 4 },
+  itemExtrasLabel: { color: COLORS.orange, fontSize: 13.5, lineHeight: 20, fontWeight: "900", marginTop: 7 },
+  itemExtra: { color: COLORS.orange, fontSize: 13.5, lineHeight: 20, fontWeight: "800", marginTop: 1 },
   itemNote: { color: COLORS.orange, fontSize: 13, lineHeight: 19, fontStyle: "italic", marginTop: 5 },
   itemPrice: { color: COLORS.ink, fontSize: 15, fontWeight: "800", marginLeft: 12 },
   divider: { height: 1, backgroundColor: "#E1E6E3", marginVertical: 17 },
@@ -252,4 +316,5 @@ const styles = StyleSheet.create({
   paymentText: { color: COLORS.muted, fontSize: 12.5, textAlign: "right", marginTop: 7 },
   continuePaymentButton: { minHeight: 50, borderRadius: 17, backgroundColor: COLORS.green, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9, marginTop: 16 },
   continuePaymentText: { color: COLORS.white, fontSize: 12, fontWeight: "900" },
+  floatingBackButton: { position: "absolute", top: 18, left: 20, zIndex: 10, elevation: 8, width: 50, height: 50, borderRadius: 18, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#DDE4DF", shadowColor: "#122D24", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
 });

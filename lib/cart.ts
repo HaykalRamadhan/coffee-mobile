@@ -15,6 +15,7 @@ type LoadCartResult = CartResult & {
 
 export type CheckoutOrder = {
   orderId: string;
+  paymentMethod: "pay_at_counter" | "midtrans_snap";
   subtotal: number;
   total: number;
 };
@@ -158,6 +159,40 @@ export const createMidtransPickupOrder = async ({
     error: null,
     order: {
       orderId: String(row.order_id),
+      paymentMethod: "midtrans_snap",
+      subtotal: Number(row.subtotal),
+      total: Number(row.total),
+    },
+  };
+};
+
+export const createCounterPickupOrder = async ({
+  customerName,
+  phone,
+  customerNote,
+}: {
+  customerName: string;
+  phone: string;
+  customerNote: string;
+}): Promise<CreateOrderResult> => {
+  if (!supabase) return { order: null, error: "Supabase is not configured." };
+
+  const { data, error } = await supabase.rpc("create_pickup_order", {
+    p_customer_name: customerName.trim(),
+    p_phone: phone.trim() || null,
+    p_customer_note: customerNote.trim(),
+  });
+
+  if (error) return { order: null, error: getCartServiceError(error) };
+
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row) return { order: null, error: "Supabase did not return the created order." };
+
+  return {
+    error: null,
+    order: {
+      orderId: String(row.order_id),
+      paymentMethod: "pay_at_counter",
       subtotal: Number(row.subtotal),
       total: Number(row.total),
     },

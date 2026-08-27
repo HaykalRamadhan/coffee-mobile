@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Network from "expo-network";
 import { StatusBar } from "expo-status-bar";
-import * as NavigationBar from "expo-navigation-bar";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
   Animated,
   AppState,
+  BackHandler,
   Easing,
   Image,
   Modal,
@@ -17,13 +17,14 @@ import {
   StyleSheet,
   Text as NativeText,
   TextInput,
+  ToastAndroid,
   View,
   useWindowDimensions,
   type AppStateStatus,
   type ImageSourcePropType,
   type TextProps,
 } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { AppUpdateManager } from "./components/AppUpdateManager";
 import { CheckoutScreen } from "./components/CheckoutScreen";
@@ -48,12 +49,17 @@ import {
   saveGuestCart,
   type CheckoutOrder,
 } from "./lib/cart";
-import { getMaintenanceConfig } from "./lib/maintenance";
+import {
+  loadMaintenanceConfig,
+  subscribeToMaintenanceConfig,
+  type MaintenanceConfig,
+} from "./lib/maintenance";
 import {
   loadAccountOrders,
   orderStatusLabel,
   type AccountOrder,
 } from "./lib/orders";
+import { getOrderItemDisplayDetails } from "./lib/orderDetails";
 import { paymentGateway } from "./lib/payments";
 import {
   clearPaymentCheckpoint,
@@ -191,6 +197,7 @@ function ProductPhoto({
 
 function KopiPowApp() {
   const { appUser, isAuthenticated, session } = useAuth();
+  const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const screenAspectRatio = Math.max(screenWidth, screenHeight) / Math.min(screenWidth, screenHeight);
   const isClassicWidePhone = screenAspectRatio < 1.9;
@@ -198,6 +205,7 @@ function KopiPowApp() {
   const targetFontScale = isClassicWidePhone ? 1.24 : screenWidth >= 400 ? 1.18 : screenWidth < 350 ? 1.08 : 1.12;
   const typographyScale = Math.max(1, targetFontScale / cappedSystemFontScale);
   const [showSplash, setShowSplash] = useState(true);
+  const [maintenanceConfig, setMaintenanceConfig] = useState<MaintenanceConfig | null>(null);
   const [activeTab, setActiveTab] = useState<"Home" | "Menu" | "Cart" | "Rewards" | "Profile">("Home");
   const [activeCategory, setActiveCategory] = useState<MenuCategory>("For you");
   const [searchQuery, setSearchQuery] = useState("");
@@ -207,6 +215,7 @@ function KopiPowApp() {
   const [cartSyncError, setCartSyncError] = useState<string | null>(null);
   const [cartHydrationVersion, setCartHydrationVersion] = useState(0);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [checkoutSubmissionInFlight, setCheckoutSubmissionInFlight] = useState(false);
   const [paymentOrder, setPaymentOrder] = useState<CheckoutOrder | null>(null);
   const [isOrderHistoryOpen, setIsOrderHistoryOpen] = useState(false);
   const [orders, setOrders] = useState<AccountOrder[]>([]);
@@ -221,7 +230,7 @@ function KopiPowApp() {
   const splashOpacity = useRef(new Animated.Value(0)).current;
   const splashScale = useRef(new Animated.Value(0.72)).current;
   const chargingProgress = useRef(new Animated.Value(0)).current;
-  const navigationHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastBackPressAt = useRef(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cartSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cartRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -691,6 +700,48 @@ function KopiPowApp() {
     if (isOrderHistoryOpen) void refreshOrders();
   }, [isOrderHistoryOpen]);
 
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+
+    const backSubscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      const now = Date.now();
+      if (now - lastBackPressAt.current <= 2_000) {
+        BackHandler.exitApp();
+        return true;
+      }
+
+      lastBackPressAt.current = now;
+      ToastAndroid.show("Press back again to exit KopiPow", ToastAndroid.SHORT);
+
+      if (selectedDrink) {
+        setSelectedDrink(null);
+        return true;
+      }
+      if (paymentOrder) {
+        setPaymentOrder(null);
+        setIsCheckoutOpen(false);
+        setIsOrderHistoryOpen(true);
+        void refreshOrders();
+        return true;
+      }
+      if (isCheckoutOpen) {
+        setIsCheckoutOpen(false);
+        return true;
+      }
+      if (isOrderHistoryOpen) {
+        setIsOrderHistoryOpen(false);
+        return true;
+      }
+      if (activeTab !== "Home") {
+        setActiveTab("Home");
+        return true;
+      }
+      return true;
+    });
+
+    return () => backSubscription.remove();
+  }, [activeTab, isCheckoutOpen, isOrderHistoryOpen, paymentOrder, selectedDrink]);
+
   const refreshContent = () => {
     if (isRefreshing) return;
 
@@ -716,37 +767,42 @@ function KopiPowApp() {
     />
   );
 
+  useEffect(() => () => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+  }, []);
+
   useEffect(() => {
-    if (Platform.OS !== "android") return;
+    let mounted = true;
+    let requestVersion = 0;
 
-    const hideNavigationBar = () => {
-      void NavigationBar.setVisibilityAsync("hidden");
+    const refreshMaintenanceConfig = async () => {
+      const version = ++requestVersion;
+      const config = await loadMaintenanceConfig();
+      if (mounted && version === requestVersion) {
+        setMaintenanceConfig(config);
+      }
     };
 
-    const scheduleNavigationBarHide = (delay = 250) => {
-      if (navigationHideTimer.current) clearTimeout(navigationHideTimer.current);
-      navigationHideTimer.current = setTimeout(hideNavigationBar, delay);
-    };
+    void refreshMaintenanceConfig();
 
-    hideNavigationBar();
-
-    const visibilitySubscription = NavigationBar.addVisibilityListener(({ visibility }) => {
-      if (visibility === "visible") scheduleNavigationBarHide();
+    const unsubscribeFromMaintenance = subscribeToMaintenanceConfig((config) => {
+      if (mounted) setMaintenanceConfig(config);
     });
 
-    const appStateSubscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") scheduleNavigationBarHide(100);
+    const pollTimer = setInterval(() => {
+      if (appStateRef.current === "active") void refreshMaintenanceConfig();
+    }, 30000);
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refreshMaintenanceConfig();
     });
 
     return () => {
-      visibilitySubscription.remove();
-      appStateSubscription.remove();
-      if (navigationHideTimer.current) clearTimeout(navigationHideTimer.current);
+      mounted = false;
+      clearInterval(pollTimer);
+      unsubscribeFromMaintenance();
+      subscription.remove();
     };
-  }, []);
-
-  useEffect(() => () => {
-    if (refreshTimer.current) clearTimeout(refreshTimer.current);
   }, []);
 
   useEffect(() => {
@@ -810,28 +866,39 @@ function KopiPowApp() {
     return () => chargingAnimation.stop();
   }, [activeTab, chargingProgress]);
 
-  if (showSplash) {
+  if (showSplash || maintenanceConfig === null) {
     return (
       <TypographyScaleContext.Provider value={typographyScale}>
-        <SafeAreaProvider>
-          <SafeAreaView style={styles.splashSafeArea}>
-            <StatusBar hidden />
-            <Animated.View style={[styles.splashLogo, { opacity: splashOpacity, transform: [{ scale: splashScale }] }]}>
+          <SafeAreaView edges={["left", "right", "bottom"]} style={styles.splashSafeArea}>
+            <Animated.View style={[
+              styles.splashLogo,
+              maintenanceConfig === null
+                ? { opacity: 1, transform: [{ scale: 1 }] }
+                : { opacity: splashOpacity, transform: [{ scale: splashScale }] },
+            ]}>
               <View style={styles.splashLogoMark}><Text style={styles.splashBolt}>ϟ</Text></View>
               <Text style={styles.splashName}>Kopi POW!</Text>
               <Text style={styles.splashTagline}>99% REAAAADY TO GOW</Text>
             </Animated.View>
           </SafeAreaView>
-        </SafeAreaProvider>
       </TypographyScaleContext.Provider>
+    );
+  }
+
+  const maintenanceMustWaitForPayment = Boolean(paymentOrder) || checkoutSubmissionInFlight;
+
+  if (maintenanceConfig.enabled && !maintenanceMustWaitForPayment) {
+    return (
+      <>
+        <MaintenanceScreen message={maintenanceConfig.message} />
+        <AppUpdateManager blocked={false} networkAvailable={networkAvailable} />
+      </>
     );
   }
 
   return (
     <TypographyScaleContext.Provider value={typographyScale}>
-      <SafeAreaProvider>
-        <SafeAreaView style={styles.safeArea}>
-        <StatusBar hidden />
+        <SafeAreaView edges={["left", "right"]} style={styles.safeArea}>
         {paymentOrder ? (
           <MidtransPaymentScreen
             key={paymentOrder.orderId}
@@ -854,6 +921,7 @@ function KopiPowApp() {
             customerName={appUser.displayName}
             subtotal={cartSubtotal}
             onBack={() => setIsCheckoutOpen(false)}
+            onSubmissionStateChange={setCheckoutSubmissionInFlight}
             onOrderCreated={(order) => {
               const userId = session?.user.id;
               clearCartSyncTimers();
@@ -871,7 +939,13 @@ function KopiPowApp() {
               setCart(EMPTY_CART);
               setCartSyncError(null);
               setCartSyncStatus("saved");
-              setPaymentOrder(order);
+              if (order.paymentMethod === "midtrans_snap") {
+                setPaymentOrder(order);
+              } else {
+                setPaymentOrder(null);
+                setIsCheckoutOpen(false);
+                setIsOrderHistoryOpen(true);
+              }
               void refreshOrders();
             }}
           />
@@ -887,6 +961,7 @@ function KopiPowApp() {
               setIsOrderHistoryOpen(false);
               setPaymentOrder({
                 orderId: order.id,
+                paymentMethod: "midtrans_snap",
                 subtotal: order.subtotal,
                 total: order.total,
               });
@@ -897,7 +972,7 @@ function KopiPowApp() {
             }}
           />
         ) : <>
-        {activeTab === "Home" ? <ScrollView key={`home-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+        {activeTab === "Home" ? <ScrollView key={`home-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.scrollContent, { paddingTop: 14 + insets.top, paddingBottom: 118 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -1010,7 +1085,7 @@ function KopiPowApp() {
           searchQuery={searchQuery}
           typographyScale={typographyScale}
         />
-      ) : activeTab === "Rewards" ? <ScrollView key={`rewards-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.rewardsPage} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      ) : activeTab === "Rewards" ? <ScrollView key={`rewards-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.rewardsPage, { paddingTop: 14 + insets.top, paddingBottom: 108 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -1048,7 +1123,7 @@ function KopiPowApp() {
           <Text style={styles.comingSoonTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.74}>Something powerful{`\n`}is coming!</Text>
           <Text style={styles.comingSoonCopy}>We&apos;re brewing a rewards experience worth waiting for. Check back soon.</Text>
         </View>
-      </ScrollView> : activeTab === "Cart" ? <ScrollView key={`cart-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={styles.cartContent} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      </ScrollView> : activeTab === "Cart" ? <ScrollView key={`cart-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.cartContent, { paddingTop: 14 + insets.top, paddingBottom: 128 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -1111,7 +1186,9 @@ function KopiPowApp() {
           </Pressable>
         </View> : <>
           <View style={styles.cartList}>
-            {cart.items.map((item) => (
+            {cart.items.map((item) => {
+              const details = getOrderItemDisplayDetails(item.customization);
+              return (
               <View key={item.lineId} style={styles.cartItemCard}>
                 <View style={[styles.cartItemVisual, { backgroundColor: item.accent }]}>
                   {item.category === "Snacks"
@@ -1125,10 +1202,13 @@ function KopiPowApp() {
                       <Ionicons name="trash-outline" size={19} color={COLORS.muted} />
                     </Pressable>
                   </View>
-                  {item.customization && <>
-                    <Text style={styles.cartItemOptions}>{item.customization.size} · {item.customization.temperature} · {item.customization.sugar} sugar</Text>
-                    <Text style={styles.cartItemOptions}>{item.customization.milk} · {item.customization.ice}</Text>
-                    {item.customization.extras.length > 0 && <Text style={styles.cartItemOptions}>+ {item.customization.extras.join(", ")}</Text>}
+                  {details.primary && <Text style={styles.cartItemOptions}>{details.primary}</Text>}
+                  {details.secondary && <Text style={styles.cartItemOptions}>{details.secondary}</Text>}
+                  {details.extras.length > 0 && <>
+                    <Text style={styles.cartItemExtrasLabel}>Extras:</Text>
+                    {details.extras.map((extra, index) => (
+                      <Text key={`${item.lineId}-extra-${index}`} style={styles.cartItemExtra}>- {extra}</Text>
+                    ))}
                   </>}
                   {item.note.length > 0 && <Text style={styles.cartItemNote}>“{item.note}”</Text>}
                   <View style={styles.cartItemBottom}>
@@ -1141,7 +1221,8 @@ function KopiPowApp() {
                   </View>
                 </View>
               </View>
-            ))}
+              );
+            })}
           </View>
 
           <View style={styles.cartSummary}>
@@ -1177,7 +1258,13 @@ function KopiPowApp() {
         onOpenOrderHistory={() => setIsOrderHistoryOpen(true)}
       />}
 
-        <View style={styles.bottomNav}>
+        <View style={[
+          styles.bottomNav,
+          {
+            height: 78 + insets.bottom,
+            paddingBottom: 4 + insets.bottom,
+          },
+        ]}>
           <Pressable style={styles.navItem} onPress={() => setActiveTab("Home")}>
             <Ionicons name={activeTab === "Home" ? "home" : "home-outline"} size={24} color={activeTab === "Home" ? COLORS.orange : "#9B9C95"} />
             <Text style={activeTab === "Home" ? styles.navLabelActive : styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Home</Text>
@@ -1290,27 +1377,18 @@ function KopiPowApp() {
           networkAvailable={networkAvailable}
         />
         </SafeAreaView>
-      </SafeAreaProvider>
     </TypographyScaleContext.Provider>
   );
 }
 
 export default function App() {
-  const maintenanceConfig = getMaintenanceConfig();
-
-  if (maintenanceConfig.enabled) {
-    return (
-      <SafeAreaProvider>
-        <MaintenanceScreen message={maintenanceConfig.message} />
-        <AppUpdateManager blocked={false} networkAvailable />
-      </SafeAreaProvider>
-    );
-  }
-
   return (
-    <AuthProvider>
-      <KopiPowApp />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <StatusBar style="dark" hidden={false} translucent backgroundColor="transparent" />
+      <AuthProvider>
+        <KopiPowApp />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -1357,6 +1435,8 @@ const styles = StyleSheet.create({
   cartItemTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   cartItemName: { flex: 1, color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 17, fontWeight: "900" },
   cartItemOptions: { color: COLORS.muted, fontSize: 8.5, lineHeight: 13, marginTop: 3 },
+  cartItemExtrasLabel: { color: COLORS.orange, fontSize: 8.5, lineHeight: 13, fontWeight: "900", marginTop: 5 },
+  cartItemExtra: { color: COLORS.orange, fontSize: 8.5, lineHeight: 13, fontWeight: "800", marginTop: 1 },
   cartItemNote: { color: COLORS.orange, fontSize: 8.5, fontStyle: "italic", lineHeight: 13, marginTop: 4 },
   cartItemBottom: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 },
   cartItemPrice: { color: COLORS.ink, fontSize: 11, fontWeight: "900" },
@@ -1461,7 +1541,7 @@ const styles = StyleSheet.create({
   addConfiguredButton: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: COLORS.green, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 15 },
   addConfiguredText: { color: COLORS.white, fontSize: 12, fontWeight: "900" },
   addConfiguredPrice: { color: COLORS.yellow, fontSize: 12, fontWeight: "900" },
-  bottomNav: { position: "absolute", left: 0, right: 0, bottom: 0, height: 94, backgroundColor: COLORS.white, borderTopWidth: 1, borderColor: "#E1E6E3", flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingBottom: 10 },
+  bottomNav: { position: "absolute", left: 0, right: 0, bottom: -15, height: 78, backgroundColor: COLORS.white, borderTopWidth: 1, borderColor: "#E1E6E3", flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingBottom: 4 },
   navItem: { width: 60, alignItems: "center", justifyContent: "center", gap: 4 },
   navLabel: { color: "#9B9C95", fontSize: 10.5, fontWeight: "700" },
   navLabelActive: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900" },

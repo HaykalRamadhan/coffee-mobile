@@ -13,6 +13,7 @@ import {
   type RefreshControlProps,
   type TextProps,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const COLORS = {
   ink: "#153F32",
@@ -103,6 +104,7 @@ export function MenuScreen({
   searchQuery,
   typographyScale,
 }: MenuScreenProps) {
+  const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const useSingleColumn = screenWidth < 340;
   const useThreeColumns = screenWidth >= 700;
@@ -141,7 +143,10 @@ export function MenuScreen({
     <MenuTypographyContext.Provider value={typographyScale}>
       <ScrollView
         style={styles.screen}
-        contentContainerStyle={styles.menuContent}
+        contentContainerStyle={[
+          styles.menuContent,
+          { paddingTop: 14 + insets.top, paddingBottom: 118 + insets.bottom },
+        ]}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={false}
         refreshControl={refreshControl}

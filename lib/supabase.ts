@@ -7,7 +7,12 @@ import "react-native-url-polyfill/auto";
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
 const supabasePublishableKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
 
-export const authRedirectUrl = ExpoLinking.createURL("auth/callback");
+// Native auth emails must always return to the installed KopiPow app. Using a
+// fixed custom-scheme URL also keeps Supabase's redirect allow-list stable
+// across development, preview, and production builds.
+export const authRedirectUrl = Platform.OS === "web"
+  ? ExpoLinking.createURL("auth/callback")
+  : "kopipow://auth/callback";
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl

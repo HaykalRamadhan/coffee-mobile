@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { StatusBar } from "expo-status-bar";
 import {
   StyleSheet,
   Text as NativeText,
@@ -7,7 +6,7 @@ import {
   useWindowDimensions,
   type TextProps,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const COLORS = {
   ink: "#153F32",
@@ -24,16 +23,16 @@ function Text({ maxFontSizeMultiplier = 1.2, ...props }: TextProps) {
 }
 
 export function MaintenanceScreen({ message }: { message: string }) {
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const compact = width < 350;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar hidden />
+    <SafeAreaView edges={["left", "right", "bottom"]} style={styles.safeArea}>
       <View style={styles.backgroundBoltTop}><Text style={styles.backgroundBolt}>ϟ</Text></View>
       <View style={styles.backgroundBoltBottom}><Text style={styles.backgroundBolt}>ϟ</Text></View>
 
-      <View style={styles.content}>
+      <View style={[styles.content, { paddingTop: 40 + insets.top }]}>
         <View style={styles.brandRow}>
           <View style={styles.logoMark}><Text style={styles.logoBolt}>ϟ</Text></View>
           <View>
