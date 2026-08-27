@@ -36,6 +36,7 @@ export const supabaseAuth = isSupabaseConfigured
       persistSession: true,
       detectSessionInUrl: false,
       lock: processLock,
+      lockAcquireTimeout: 10_000,
     },
   })
   : null;
