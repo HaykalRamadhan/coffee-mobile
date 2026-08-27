@@ -22,6 +22,7 @@ type PaymentAttempt = {
   order_id: string;
   gross_amount: number;
   provider_order_id: string;
+  status: "created" | "pending" | "paid" | "failed" | "expired" | "cancelled" | "refunded";
 };
 
 const getMidtransConfig = () => {
@@ -172,7 +173,7 @@ export const synchronizeMidtransStatus = async (
 ) => {
   const { data: attemptData, error: attemptError } = await serviceClient
     .from("payment_attempts")
-    .select("id, order_id, gross_amount, provider_order_id")
+    .select("id, order_id, gross_amount, provider_order_id, status")
     .eq("provider_order_id", providerOrderId)
     .maybeSingle();
 
@@ -187,50 +188,70 @@ export const synchronizeMidtransStatus = async (
   }
 
   const mapped = mapMidtransStatus(status);
+  const protectedAttemptStatus = attempt.status === "refunded"
+    || (attempt.status === "paid" && mapped.attempt !== "refunded")
+      ? attempt.status
+      : mapped.attempt;
   const now = new Date().toISOString();
-  const { error: updateAttemptError } = await serviceClient
+  let attemptUpdate = serviceClient
     .from("payment_attempts")
     .update({
       provider_transaction_id: status.transaction_id ?? null,
-      status: mapped.attempt,
+      status: protectedAttemptStatus,
       payment_type: status.payment_type ?? null,
       raw_status: status,
       updated_at: now,
     })
     .eq("id", attempt.id);
+  if (!["paid", "refunded"].includes(mapped.attempt)) {
+    attemptUpdate = attemptUpdate.not("status", "in", "(paid,refunded)");
+  } else if (mapped.attempt === "paid") {
+    attemptUpdate = attemptUpdate.neq("status", "refunded");
+  }
+  const { error: updateAttemptError } = await attemptUpdate;
   if (updateAttemptError) throw updateAttemptError;
 
   const { data: orderData, error: orderReadError } = await serviceClient
     .from("orders")
-    .select("status")
+    .select("status, payment_status")
     .eq("id", attempt.order_id)
     .single();
   if (orderReadError) throw orderReadError;
 
+  const protectedOrderStatus = orderData.payment_status === "refunded"
+    || (orderData.payment_status === "paid" && mapped.order !== "refunded")
+      ? orderData.payment_status
+      : mapped.order;
   const orderUpdate: Record<string, unknown> = {
-    payment_status: mapped.order,
+    payment_status: protectedOrderStatus,
     updated_at: now,
   };
-  if (mapped.order === "paid") {
+  if (protectedOrderStatus === "paid") {
     orderUpdate.paid_at = now;
     if (["pending", "cancelled"].includes(orderData.status)) orderUpdate.status = "confirmed";
   } else if (
-    ["failed", "expired"].includes(mapped.order)
-    && mapped.attempt !== "cancelled"
+    ["failed", "expired"].includes(protectedOrderStatus)
+    && protectedAttemptStatus !== "cancelled"
     && orderData.status === "pending"
   ) {
     orderUpdate.status = "cancelled";
   }
 
-  const { error: updateOrderError } = await serviceClient
+  let orderUpdateRequest = serviceClient
     .from("orders")
     .update(orderUpdate)
     .eq("id", attempt.order_id);
+  if (!["paid", "refunded"].includes(mapped.order)) {
+    orderUpdateRequest = orderUpdateRequest.not("payment_status", "in", "(paid,refunded)");
+  } else if (mapped.order === "paid") {
+    orderUpdateRequest = orderUpdateRequest.neq("payment_status", "refunded");
+  }
+  const { error: updateOrderError } = await orderUpdateRequest;
   if (updateOrderError) throw updateOrderError;
 
   return {
     orderId: attempt.order_id,
-    paymentStatus: mapped.order,
+    paymentStatus: protectedOrderStatus,
     paymentType: status.payment_type ?? null,
     transactionStatus: status.transaction_status ?? "pending",
   };
