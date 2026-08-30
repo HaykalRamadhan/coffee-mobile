@@ -1,19 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
-import { createContext, useContext, type ReactElement } from "react";
+import { Image, type ImageSource } from "expo-image";
+import { createContext, useContext, useEffect, useState, type ReactElement } from "react";
 import {
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text as NativeText,
   TextInput,
   View,
-  useWindowDimensions,
-  type ImageSourcePropType,
   type RefreshControlProps,
   type TextProps,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { PRODUCT_IMAGE_PATHS } from "../assets/products/productImages";
+import { useResponsiveLayout } from "../lib/responsive";
+import { DISPLAY_FONT_FAMILY, getResponsiveTextStyle } from "../lib/typography";
 
 const COLORS = {
   ink: "#153F32",
@@ -36,25 +37,27 @@ export type MenuDrink = {
   basePrice: number;
   accent: string;
   coffee: string;
-  imageSource: ImageSourcePropType | null;
+  imagePath: string;
+  imageSource: ImageSource | null;
   tag: string;
   category: Exclude<MenuCategory, "For you">;
 };
 
 export const menuDrinks: MenuDrink[] = [
-  { id: 1, name: "Power Latte", detail: "Double espresso · oat milk", price: "Rp 42k", basePrice: 42000, accent: "#D9B38A", coffee: "#704129", imageSource: null, tag: "BESTSELLER", category: "Coffee" },
-  { id: 2, name: "Orange Bolt", detail: "Espresso · orange tonic", price: "Rp 39k", basePrice: 39000, accent: "#EE9851", coffee: "#7A3825", imageSource: null, tag: "NEW", category: "Coffee" },
-  { id: 3, name: "Sesame Charge", detail: "Black sesame · fresh milk", price: "Rp 44k", basePrice: 44000, accent: "#A9A79C", coffee: "#413A35", imageSource: null, tag: "SIGNATURE", category: "Non-coffee" },
-  { id: 4, name: "Matcha Pow", detail: "Ceremonial matcha · oat milk", price: "Rp 45k", basePrice: 45000, accent: "#9BAC75", coffee: "#66804C", imageSource: null, tag: "FRESH", category: "Non-coffee" },
-  { id: 5, name: "Cocoa Kick", detail: "Dark cocoa · fresh milk", price: "Rp 38k", basePrice: 38000, accent: "#B68A6D", coffee: "#56382C", imageSource: null, tag: "CLASSIC", category: "Non-coffee" },
-  { id: 6, name: "Long Black", detail: "Double espresso · water", price: "Rp 32k", basePrice: 32000, accent: "#948274", coffee: "#33231D", imageSource: null, tag: "STRONG", category: "Coffee" },
-  { id: 7, name: "Butter Croffle", detail: "Caramelized · sea salt", price: "Rp 35k", basePrice: 35000, accent: "#D3A45F", coffee: "#8B5D35", imageSource: null, tag: "CRISPY", category: "Snacks" },
-  { id: 8, name: "Power Banana", detail: "Banana loaf · brown butter", price: "Rp 34k", basePrice: 34000, accent: "#D9B75D", coffee: "#7A5330", imageSource: null, tag: "BAKED", category: "Snacks" },
+  { id: 1, name: "Power Latte", detail: "Double espresso · oat milk", price: "Rp 42k", basePrice: 42000, accent: "#D9B38A", coffee: "#704129", imagePath: PRODUCT_IMAGE_PATHS.powerLatte, imageSource: null, tag: "BESTSELLER", category: "Coffee" },
+  { id: 2, name: "Orange Bolt", detail: "Espresso · orange tonic", price: "Rp 39k", basePrice: 39000, accent: "#EE9851", coffee: "#7A3825", imagePath: PRODUCT_IMAGE_PATHS.orangeBolt, imageSource: null, tag: "NEW", category: "Coffee" },
+  { id: 3, name: "Sesame Charge", detail: "Black sesame · fresh milk", price: "Rp 44k", basePrice: 44000, accent: "#A9A79C", coffee: "#413A35", imagePath: PRODUCT_IMAGE_PATHS.sesameCharge, imageSource: null, tag: "SIGNATURE", category: "Non-coffee" },
+  { id: 4, name: "Matcha Pow", detail: "Ceremonial matcha · oat milk", price: "Rp 45k", basePrice: 45000, accent: "#9BAC75", coffee: "#66804C", imagePath: PRODUCT_IMAGE_PATHS.matchaPow, imageSource: null, tag: "FRESH", category: "Non-coffee" },
+  { id: 5, name: "Cocoa Kick", detail: "Dark cocoa · fresh milk", price: "Rp 38k", basePrice: 38000, accent: "#B68A6D", coffee: "#56382C", imagePath: PRODUCT_IMAGE_PATHS.cocoaKick, imageSource: null, tag: "CLASSIC", category: "Non-coffee" },
+  { id: 6, name: "Long Black", detail: "Double espresso · water", price: "Rp 32k", basePrice: 32000, accent: "#948274", coffee: "#33231D", imagePath: PRODUCT_IMAGE_PATHS.longBlack, imageSource: null, tag: "STRONG", category: "Coffee" },
+  { id: 7, name: "Butter Croffle", detail: "Caramelized · sea salt", price: "Rp 35k", basePrice: 35000, accent: "#D3A45F", coffee: "#8B5D35", imagePath: PRODUCT_IMAGE_PATHS.butterCroffle, imageSource: null, tag: "CRISPY", category: "Snacks" },
+  { id: 8, name: "Power Banana", detail: "Banana loaf · brown butter", price: "Rp 34k", basePrice: 34000, accent: "#D9B75D", coffee: "#7A5330", imagePath: PRODUCT_IMAGE_PATHS.powerBanana, imageSource: null, tag: "BAKED", category: "Snacks" },
 ];
 
 type MenuScreenProps = {
   activeCategory: MenuCategory;
   currentUserInitials: string;
+  drinks: MenuDrink[];
   onActiveCategoryChange: (category: MenuCategory) => void;
   onCustomizeDrink: (drink: MenuDrink) => void;
   onOpenProfile: () => void;
@@ -68,18 +71,27 @@ const MenuTypographyContext = createContext(1);
 
 function Text({ maxFontSizeMultiplier = 1.2, ...props }: TextProps) {
   const typographyScale = useContext(MenuTypographyContext);
-  const flattenedStyle = StyleSheet.flatten(props.style);
-  const responsiveStyle = flattenedStyle?.fontSize ? {
-    fontSize: flattenedStyle.fontSize * typographyScale,
-    lineHeight: flattenedStyle.lineHeight ? flattenedStyle.lineHeight * typographyScale : undefined,
-  } : undefined;
+  const responsiveStyle = getResponsiveTextStyle(props.style, typographyScale);
 
   return <NativeText maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} style={[props.style, responsiveStyle]} />;
 }
 
-function ProductPhoto({ imageSource, name }: { imageSource: ImageSourcePropType | null; name: string }) {
-  if (imageSource) {
-    return <Image source={imageSource} style={styles.productPhoto} resizeMode="cover" accessibilityLabel={`${name} product photo`} />;
+function ProductPhoto({ imageSource, name }: { imageSource: ImageSource | null; name: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [imageSource]);
+
+  if (imageSource && !failed) {
+    return (
+      <Image
+        source={imageSource}
+        style={styles.productPhoto}
+        contentFit="contain"
+        cachePolicy="memory-disk"
+        transition={180}
+        onError={() => setFailed(true)}
+        accessibilityLabel={`${name} product photo`}
+      />
+    );
   }
 
   return (
@@ -96,6 +108,7 @@ function ProductPhoto({ imageSource, name }: { imageSource: ImageSourcePropType 
 export function MenuScreen({
   activeCategory,
   currentUserInitials,
+  drinks,
   onActiveCategoryChange,
   onCustomizeDrink,
   onOpenProfile,
@@ -105,7 +118,8 @@ export function MenuScreen({
   typographyScale,
 }: MenuScreenProps) {
   const insets = useSafeAreaInsets();
-  const { width: screenWidth } = useWindowDimensions();
+  const responsiveLayout = useResponsiveLayout();
+  const screenWidth = responsiveLayout.width;
   const useSingleColumn = screenWidth < 340;
   const useThreeColumns = screenWidth >= 700;
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
@@ -145,6 +159,12 @@ export function MenuScreen({
         style={styles.screen}
         contentContainerStyle={[
           styles.menuContent,
+          {
+            alignSelf: "center",
+            maxWidth: responsiveLayout.contentMaxWidth,
+            paddingHorizontal: responsiveLayout.gutter,
+            width: "100%",
+          },
           { paddingTop: 14 + insets.top, paddingBottom: 118 + insets.bottom },
         ]}
         showsVerticalScrollIndicator={false}
@@ -167,7 +187,7 @@ export function MenuScreen({
           </Pressable>
         </View>
 
-        <View style={styles.menuHeadingRow}>
+        <View style={[styles.menuHeadingRow, responsiveLayout.isCompact && styles.menuHeadingRowCompact]}>
           <View>
             <Text style={styles.menuEyebrow}>CHOOSE YOUR POWER</Text>
             <Text style={styles.menuTitle}>The Menu!</Text>
@@ -266,8 +286,9 @@ const styles = StyleSheet.create({
   avatarText: { color: COLORS.white, fontSize: 15, fontWeight: "800" },
   onlineDot: { position: "absolute", right: -1, bottom: 1, width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.yellow, borderWidth: 2, borderColor: COLORS.cream },
   menuHeadingRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", paddingTop: 26, marginBottom: 22 },
+  menuHeadingRowCompact: { paddingTop: 16, marginBottom: 16 },
   menuEyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 6 },
-  menuTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 43, lineHeight: 47, letterSpacing: -1.5 },
+  menuTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 43, lineHeight: 47, letterSpacing: -1.5 },
   searchBar: { minHeight: 54, borderRadius: 17, backgroundColor: COLORS.white, borderWidth: 1, borderColor: "#DDE3DF", flexDirection: "row", alignItems: "center", paddingHorizontal: 15, marginBottom: 12 },
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, minWidth: 0, color: COLORS.ink, fontWeight: "600", paddingVertical: 12 },
@@ -280,14 +301,14 @@ const styles = StyleSheet.create({
   categoryTextActive: { color: COLORS.white },
   menuSectionRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", marginTop: 5, marginBottom: 15 },
   sectionEyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 5 },
-  menuSectionTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 24, fontWeight: "900" },
+  menuSectionTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 24 },
   menuGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 13 },
   menuCard: { width: "48.3%", backgroundColor: COLORS.white, borderRadius: 20, padding: 9 },
   menuCardSingleColumn: { width: "100%" },
   menuCardThreeColumns: { width: "31.7%" },
   menuDrinkVisual: { height: 145, borderRadius: 14, alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  menuDrinkTag: { position: "absolute", left: 8, top: 8, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 10, borderWidth: 1.5, borderColor: COLORS.green, paddingHorizontal: 8, paddingVertical: 5, fontSize: 7.5, fontWeight: "900", letterSpacing: 0.5, zIndex: 5, elevation: 4 },
-  menuDrinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 16, lineHeight: 19, fontWeight: "900", minHeight: 40, marginTop: 10 },
+  menuDrinkTag: { position: "absolute", left: 6, top: 6, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 8, borderWidth: 1.25, borderColor: COLORS.green, paddingHorizontal: 6, paddingVertical: 4, fontSize: 5.5, fontWeight: "900", letterSpacing: 0.4, zIndex: 5, elevation: 3 },
+  menuDrinkName: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 16, lineHeight: 19, minHeight: 40, marginTop: 10 },
   menuDrinkDetail: { color: COLORS.muted, fontSize: 7.5, lineHeight: 11, minHeight: 28, marginTop: 4 },
   menuDrinkPrice: { color: COLORS.ink, fontSize: 11, fontWeight: "900" },
   productPhoto: { width: "100%", height: "100%", borderRadius: 14 },
@@ -301,7 +322,7 @@ const styles = StyleSheet.create({
   addButtonText: { color: COLORS.white, fontSize: 16, fontWeight: "800", marginTop: -2 },
   emptySearchCard: { width: "100%", backgroundColor: COLORS.white, borderRadius: 22, paddingHorizontal: 24, paddingVertical: 30, alignItems: "center", borderWidth: 1, borderColor: "#DDE3DF" },
   emptySearchIcon: { width: 54, height: 54, borderRadius: 18, backgroundColor: "#F3F5F4", alignItems: "center", justifyContent: "center", marginBottom: 13 },
-  emptySearchTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 21, fontWeight: "900", textAlign: "center" },
+  emptySearchTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 21, textAlign: "center" },
   emptySearchCopy: { color: COLORS.muted, fontSize: 9, lineHeight: 14, textAlign: "center", marginTop: 6 },
   emptySearchButton: { backgroundColor: COLORS.orange, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 11, marginTop: 17 },
   emptySearchButtonText: { color: COLORS.white, fontSize: 9, fontWeight: "900" },

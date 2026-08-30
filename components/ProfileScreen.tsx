@@ -15,6 +15,8 @@ import { createContext, useContext, useEffect, useState, type ReactElement } fro
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { orderStatusLabel, type AccountOrder } from "../lib/orders";
+import { useResponsiveLayout } from "../lib/responsive";
+import { DISPLAY_FONT_FAMILY, getResponsiveTextStyle } from "../lib/typography";
 
 const COLORS = {
   ink: "#153F32",
@@ -49,11 +51,7 @@ const ProfileTypographyContext = createContext(1);
 
 function Text({ maxFontSizeMultiplier = 1.2, ...props }: TextProps) {
   const typographyScale = useContext(ProfileTypographyContext);
-  const flattenedStyle = StyleSheet.flatten(props.style);
-  const responsiveStyle = flattenedStyle?.fontSize ? {
-    fontSize: flattenedStyle.fontSize * typographyScale,
-    lineHeight: flattenedStyle.lineHeight ? flattenedStyle.lineHeight * typographyScale : undefined,
-  } : undefined;
+  const responsiveStyle = getResponsiveTextStyle(props.style, typographyScale);
 
   return <NativeText maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} style={[props.style, responsiveStyle]} />;
 }
@@ -250,6 +248,7 @@ export function ProfileScreen({
   };
 
   const inputTextSize = 12.5 * typographyScale;
+  const responsiveLayout = useResponsiveLayout();
 
   return (
     <ProfileTypographyContext.Provider value={typographyScale}>
@@ -257,6 +256,12 @@ export function ProfileScreen({
         style={styles.screen}
         contentContainerStyle={[
           styles.content,
+          {
+            alignSelf: "center",
+            maxWidth: responsiveLayout.contentMaxWidth,
+            paddingHorizontal: responsiveLayout.gutter,
+            width: "100%",
+          },
           { paddingTop: 14 + insets.top, paddingBottom: 124 + insets.bottom },
         ]}
         showsVerticalScrollIndicator={false}
@@ -627,8 +632,8 @@ export function ProfileScreen({
         statusBarTranslucent
         onRequestClose={closeDeleteModal}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.deleteModal}>
+        <View style={[styles.modalBackdrop, { paddingHorizontal: responsiveLayout.gutter }]}>
+          <View style={[styles.deleteModal, responsiveLayout.isCompact && styles.deleteModalCompact]}>
             <View style={styles.deleteModalIcon}>
               <Ionicons name="warning-outline" size={28} color="#A43A32" />
             </View>
@@ -698,7 +703,7 @@ const styles = StyleSheet.create({
   statusDotOnline: { backgroundColor: COLORS.yellow },
   heading: { paddingTop: 24, paddingBottom: 24 },
   eyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 7 },
-  title: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 42, lineHeight: 45, letterSpacing: -1.5, paddingBottom: 7, marginBottom: -7 },
+  title: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 42, lineHeight: 45, letterSpacing: -1.5, paddingBottom: 7, marginBottom: -7 },
   headingCopy: { color: COLORS.muted, fontSize: 11.5, lineHeight: 18, maxWidth: 330, marginTop: 10 },
   loadingCard: { minHeight: 210, borderRadius: 24, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", gap: 16 },
   loadingText: { color: COLORS.muted, fontSize: 11, fontWeight: "700" },
@@ -713,7 +718,7 @@ const styles = StyleSheet.create({
   modeButtonActive: { backgroundColor: COLORS.green },
   modeText: { color: COLORS.muted, fontSize: 10, fontWeight: "800" },
   modeTextActive: { color: COLORS.white, fontWeight: "900" },
-  authTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 25, fontWeight: "900" },
+  authTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 25 },
   authSubtitle: { color: COLORS.muted, fontSize: 9.5, lineHeight: 15, marginTop: 5, marginBottom: 20 },
   inputLabel: { color: COLORS.green, fontSize: 8, fontWeight: "900", letterSpacing: 1.15, marginBottom: 7, marginTop: 2 },
   input: { minHeight: 50, borderRadius: 15, backgroundColor: "#F3F5F4", borderWidth: 1, borderColor: "#DDE3DF", color: COLORS.ink, fontWeight: "600", paddingHorizontal: 14, marginBottom: 15 },
@@ -736,7 +741,7 @@ const styles = StyleSheet.create({
   identityAvatar: { width: 66, height: 66, borderRadius: 23, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginRight: 15, transform: [{ rotate: "-3deg" }] },
   identityInitials: { color: COLORS.green, fontSize: 22, fontWeight: "900" },
   identityCopy: { flex: 1 },
-  identityName: { color: COLORS.white, fontFamily: "serif", fontStyle: "italic", fontSize: 20, fontWeight: "900", paddingBottom: 4, marginBottom: -4 },
+  identityName: { color: COLORS.white, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 20, paddingBottom: 4, marginBottom: -4 },
   identityEmail: { color: "#C8D2C7", fontSize: 8.5, marginTop: 3 },
   verifiedPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: COLORS.yellow, borderRadius: 12, paddingHorizontal: 9, paddingVertical: 5, marginTop: 9 },
   verifiedText: { color: COLORS.green, fontSize: 7.5, fontWeight: "900" },
@@ -776,9 +781,10 @@ const styles = StyleSheet.create({
   deleteAccountButton: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: "#F4DCD7", borderRadius: 15, paddingHorizontal: 14, paddingVertical: 10, marginTop: 14 },
   deleteAccountText: { color: "#A43A32", fontSize: 9, fontWeight: "900" },
   modalBackdrop: { flex: 1, justifyContent: "center", paddingHorizontal: 24, backgroundColor: "rgba(8, 28, 22, 0.64)" },
-  deleteModal: { backgroundColor: COLORS.white, borderRadius: 25, padding: 22, borderWidth: 1, borderColor: "#E3D5D1" },
+  deleteModal: { width: "100%", maxWidth: 480, alignSelf: "center", backgroundColor: COLORS.white, borderRadius: 25, padding: 22, borderWidth: 1, borderColor: "#E3D5D1" },
+  deleteModalCompact: { padding: 18, borderRadius: 22 },
   deleteModalIcon: { width: 52, height: 52, borderRadius: 17, backgroundColor: "#F4DCD7", alignItems: "center", justifyContent: "center", marginBottom: 16 },
-  deleteModalTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 25, lineHeight: 30 },
+  deleteModalTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 25, lineHeight: 30 },
   deleteModalCopy: { color: COLORS.muted, fontSize: 10, lineHeight: 16, marginTop: 9 },
   deleteModalPrompt: { color: "#8F382E", fontSize: 9, fontWeight: "900", letterSpacing: 0.5, marginTop: 20, marginBottom: 8 },
   deleteConfirmationInput: { minHeight: 50, borderRadius: 15, backgroundColor: "#F7F3F2", borderWidth: 1, borderColor: "#D8BDB7", color: COLORS.ink, fontSize: 14, fontWeight: "900", letterSpacing: 1.5, paddingHorizontal: 14 },

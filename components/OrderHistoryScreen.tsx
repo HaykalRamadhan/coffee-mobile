@@ -5,13 +5,14 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import { useState } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { orderStatusLabel, type AccountOrder, type OrderStatus } from "../lib/orders";
 import { getOrderItemDisplayDetails } from "../lib/orderDetails";
+import { useResponsiveLayout } from "../lib/responsive";
+import { DISPLAY_FONT_FAMILY, Text } from "../lib/typography";
 
 const COLORS = {
   ink: "#153F32",
@@ -62,6 +63,7 @@ export function OrderHistoryScreen({
   onContinuePayment,
 }: OrderHistoryScreenProps) {
   const insets = useSafeAreaInsets();
+  const responsiveLayout = useResponsiveLayout();
   const [showFloatingBack, setShowFloatingBack] = useState(false);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(() => new Set());
 
@@ -80,6 +82,12 @@ export function OrderHistoryScreen({
         style={styles.scrollView}
         contentContainerStyle={[
           styles.content,
+          {
+            alignSelf: "center",
+            maxWidth: responsiveLayout.contentMaxWidth,
+            paddingHorizontal: responsiveLayout.gutter,
+            width: "100%",
+          },
           { paddingTop: 18 + insets.top, paddingBottom: 52 + insets.bottom },
         ]}
         showsVerticalScrollIndicator={false}
@@ -99,12 +107,12 @@ export function OrderHistoryScreen({
         )}
       >
       <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={onBack} accessibilityLabel="Go back">
+        <Pressable style={[styles.backButton, responsiveLayout.isCompact && styles.backButtonNarrow]} onPress={onBack} accessibilityLabel="Go back">
           <Ionicons name="arrow-back" size={28} color={COLORS.green} />
         </Pressable>
         <View style={styles.headerCopy}>
           <Text style={styles.eyebrow}>YOUR KOPIPOW JOURNEY</Text>
-          <Text style={styles.title}>Order History!</Text>
+          <Text style={[styles.title, responsiveLayout.isCompact && styles.titleNarrow]}>Order History!</Text>
         </View>
       </View>
 
@@ -146,18 +154,18 @@ export function OrderHistoryScreen({
             return (
               <Pressable
                 key={order.id}
-                style={({ pressed }) => [styles.orderCard, pressed && styles.orderCardPressed]}
+                style={({ pressed }) => [styles.orderCard, responsiveLayout.isCompact && styles.orderCardNarrow, pressed && styles.orderCardPressed]}
                 onPress={() => toggleOrderDetails(order.id)}
                 accessibilityRole="button"
                 accessibilityState={{ expanded: isExpanded }}
                 accessibilityLabel={`${isExpanded ? "Hide" : "Show"} details for order ${order.id.slice(0, 8).toUpperCase()}`}
               >
-                <View style={styles.orderTopRow}>
+                <View style={[styles.orderTopRow, responsiveLayout.isCompact && styles.orderTopRowNarrow]}>
                   <View>
                     <Text style={styles.orderCodeLabel}>ORDER #{order.id.slice(0, 8).toUpperCase()}</Text>
                     <Text style={styles.orderDate}>{formatOrderDate(order.createdAt)}</Text>
                   </View>
-                  <View style={styles.orderTopActions}>
+                  <View style={[styles.orderTopActions, responsiveLayout.isCompact && styles.orderTopActionsNarrow]}>
                     <View style={[styles.statusPill, { backgroundColor: statusColor.background }]}>
                       <Text style={[styles.statusText, { color: statusColor.foreground }]}>{statusLabel}</Text>
                     </View>
@@ -185,7 +193,7 @@ export function OrderHistoryScreen({
                     const details = getOrderItemDisplayDetails(item.customization);
                     return (
                       <View key={item.id} style={styles.itemRow}>
-                        <Text style={styles.itemQuantity}>{item.quantity}×</Text>
+                        <Text style={[styles.itemQuantity, responsiveLayout.isCompact && styles.itemQuantityNarrow]}>{item.quantity}×</Text>
                         <View style={styles.itemCopy}>
                           <Text style={styles.itemName}>{item.productName}</Text>
                           {details.primary && <Text style={styles.itemDetail}>{details.primary}</Text>}
@@ -200,14 +208,14 @@ export function OrderHistoryScreen({
                           )}
                           {item.note.length > 0 && <Text style={styles.itemNote}>“{item.note}”</Text>}
                         </View>
-                        <Text style={styles.itemPrice}>{formatRupiah(item.unitPrice * item.quantity)}</Text>
+                        <Text style={[styles.itemPrice, responsiveLayout.isCompact && styles.itemPriceNarrow]}>{formatRupiah(item.unitPrice * item.quantity)}</Text>
                       </View>
                     );
                   })}
                 </View>
 
                 <View style={styles.divider} />
-                <View style={styles.orderBottomRow}>
+                <View style={[styles.orderBottomRow, responsiveLayout.isCompact && styles.orderBottomRowNarrow]}>
                   <View style={styles.pickupRow}>
                     <Ionicons name="storefront-outline" size={21} color={COLORS.green} />
                     <Text style={styles.pickupText}>Pickup · {itemCount} {itemCount === 1 ? "item" : "items"}</Text>
@@ -248,7 +256,7 @@ export function OrderHistoryScreen({
 
       {showFloatingBack && (
         <Pressable
-          style={styles.floatingBackButton}
+          style={[styles.floatingBackButton, { left: responsiveLayout.gutter, top: 18 + insets.top }]}
           onPress={onBack}
           accessibilityLabel="Go back"
         >
@@ -265,9 +273,11 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 52 },
   header: { flexDirection: "row", alignItems: "center" },
   backButton: { width: 56, height: 56, borderRadius: 19, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", marginRight: 16 },
+  backButtonNarrow: { width: 46, height: 46, borderRadius: 16, marginRight: 10 },
   headerCopy: { flex: 1 },
   eyebrow: { color: COLORS.orange, fontSize: 15, fontWeight: "900", letterSpacing: 1.45 },
-  title: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 38, lineHeight: 43, marginTop: 3 },
+  title: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 38, lineHeight: 43, marginTop: 3 },
+  titleNarrow: { fontSize: 31, lineHeight: 36 },
   intro: { color: COLORS.muted, fontSize: 16.5, lineHeight: 25, marginTop: 24, marginBottom: 24, maxWidth: 620 },
   loadingCard: { minHeight: 270, borderRadius: 27, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", gap: 16 },
   loadingText: { color: COLORS.muted, fontSize: 13, fontWeight: "700" },
@@ -278,15 +288,18 @@ const styles = StyleSheet.create({
   retryText: { color: COLORS.white, fontSize: 11.5, fontWeight: "900" },
   emptyCard: { minHeight: 300, borderRadius: 27, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", padding: 28 },
   emptyIcon: { width: 88, height: 88, borderRadius: 29, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginBottom: 20 },
-  emptyTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 28, fontWeight: "900" },
+  emptyTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 28 },
   emptyText: { color: COLORS.muted, fontSize: 12, lineHeight: 19, textAlign: "center", maxWidth: 320, marginTop: 9 },
   browseButton: { backgroundColor: COLORS.green, borderRadius: 18, paddingHorizontal: 21, paddingVertical: 14, marginTop: 20 },
   browseText: { color: COLORS.white, fontSize: 11.5, fontWeight: "900" },
   orderList: { gap: 16 },
   orderCard: { backgroundColor: COLORS.white, borderRadius: 27, padding: 22, borderWidth: 1, borderColor: "#DDE4DF" },
+  orderCardNarrow: { borderRadius: 22, padding: 16 },
   orderCardPressed: { opacity: 0.92 },
   orderTopRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  orderTopRowNarrow: { flexDirection: "column", gap: 10 },
   orderTopActions: { flexDirection: "row", alignItems: "center", gap: 9 },
+  orderTopActionsNarrow: { width: "100%", justifyContent: "space-between" },
   orderCodeLabel: { color: COLORS.ink, fontSize: 16, fontWeight: "900", letterSpacing: 0.6 },
   orderDate: { color: COLORS.muted, fontSize: 13.5, marginTop: 7 },
   statusPill: { borderRadius: 17, paddingHorizontal: 15, paddingVertical: 11 },
@@ -300,6 +313,7 @@ const styles = StyleSheet.create({
   itemList: { marginTop: 21 },
   itemRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 12 },
   itemQuantity: { width: 40, color: COLORS.orange, fontSize: 16, fontWeight: "900" },
+  itemQuantityNarrow: { width: 30, fontSize: 14 },
   itemCopy: { flex: 1 },
   itemName: { color: COLORS.ink, fontSize: 17, fontWeight: "800" },
   itemDetail: { color: COLORS.muted, fontSize: 14, lineHeight: 20, marginTop: 4 },
@@ -307,8 +321,10 @@ const styles = StyleSheet.create({
   itemExtra: { color: COLORS.orange, fontSize: 13.5, lineHeight: 20, fontWeight: "800", marginTop: 1 },
   itemNote: { color: COLORS.orange, fontSize: 13, lineHeight: 19, fontStyle: "italic", marginTop: 5 },
   itemPrice: { color: COLORS.ink, fontSize: 15, fontWeight: "800", marginLeft: 12 },
+  itemPriceNarrow: { fontSize: 12, marginLeft: 6 },
   divider: { height: 1, backgroundColor: "#E1E6E3", marginVertical: 17 },
   orderBottomRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  orderBottomRowNarrow: { alignItems: "flex-end", gap: 10 },
   pickupRow: { flexDirection: "row", alignItems: "center", gap: 9 },
   pickupText: { color: COLORS.muted, fontSize: 14, fontWeight: "700" },
   totalLabel: { color: COLORS.muted, fontSize: 12, fontWeight: "900", textAlign: "right", letterSpacing: 0.95 },

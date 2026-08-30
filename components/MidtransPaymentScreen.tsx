@@ -6,8 +6,8 @@ import {
   AppState,
   Linking,
   Pressable,
+  ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
@@ -22,6 +22,8 @@ import {
   savePaymentCheckpoint,
   type PaymentCheckpointPhase,
 } from "../lib/paymentRecovery";
+import { useResponsiveLayout } from "../lib/responsive";
+import { DISPLAY_FONT_FAMILY, Text } from "../lib/typography";
 
 const COLORS = {
   ink: "#153F32",
@@ -53,6 +55,7 @@ export function MidtransPaymentScreen({
   onPaymentUpdated,
 }: MidtransPaymentScreenProps) {
   const insets = useSafeAreaInsets();
+  const responsiveLayout = useResponsiveLayout();
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [paymentStatus, setPaymentStatus] = useState<OnlinePaymentStatus>("pending");
   const [transactionStatus, setTransactionStatus] = useState<string | null>(null);
@@ -266,8 +269,21 @@ export function MidtransPaymentScreen({
     const isClosedOrderError = Boolean(error && /cancelled|closed|not eligible/i.test(error));
     const canRetryOpening = Boolean(error) && isPending && !isClosedOrderError;
     return (
-      <View style={[styles.resultScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <View style={[styles.resultIcon, isPaid ? styles.resultIconPaid : isPending ? styles.resultIconPending : styles.resultIconFailed]}>
+      <ScrollView
+        style={styles.resultScroll}
+        contentContainerStyle={[
+          styles.resultScreen,
+          responsiveLayout.isCompact && styles.resultScreenCompact,
+          {
+            paddingHorizontal: responsiveLayout.gutter,
+            paddingTop: 16 + insets.top,
+            paddingBottom: 16 + insets.bottom,
+          },
+        ]}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.resultIcon, responsiveLayout.isCompact && styles.resultIconCompact, isPaid ? styles.resultIconPaid : isPending ? styles.resultIconPending : styles.resultIconFailed]}>
           <Ionicons
             name={isPaid ? "checkmark" : isPending ? "time-outline" : "alert-outline"}
             size={50}
@@ -275,7 +291,7 @@ export function MidtransPaymentScreen({
           />
         </View>
         <Text style={styles.eyebrow}>{isPaid ? "PAYMENT CONFIRMED" : isPending ? "PAYMENT PENDING" : isCancelled ? "PAYMENT CANCELLED" : "PAYMENT NOT COMPLETED"}</Text>
-        <Text style={styles.resultTitle}>{isPaid ? "Your power-up is paid!" : isPending ? "We’re waiting for confirmation." : isCancelled ? "No charge was made." : "Let’s try that payment again."}</Text>
+        <Text style={[styles.resultTitle, responsiveLayout.isCompact && styles.resultTitleCompact]}>{isPaid ? "Your power-up is paid!" : isPending ? "We’re waiting for confirmation." : isCancelled ? "No charge was made." : "Let’s try that payment again."}</Text>
         <Text style={styles.resultCopy}>
           {isPaid
             ? "Your order is confirmed and will appear in your order history."
@@ -303,7 +319,7 @@ export function MidtransPaymentScreen({
         <Pressable style={styles.secondaryButton} onPress={onBack}>
           <Text style={styles.secondaryButtonText}>Back to order history</Text>
         </Pressable>
-      </View>
+      </ScrollView>
     );
   }
 
@@ -369,15 +385,19 @@ const styles = StyleSheet.create({
   errorStatusText: { color: "#963A31" },
   cancelText: { color: "#963A31", fontSize: 11, fontWeight: "900" },
   centeredScreen: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.cream, paddingHorizontal: 28 },
-  loadingTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 28, fontWeight: "900", marginTop: 20 },
+  loadingTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 28, marginTop: 20 },
   loadingCopy: { color: COLORS.muted, fontSize: 12, textAlign: "center", marginTop: 8 },
-  resultScreen: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.cream, paddingHorizontal: 27 },
+  resultScroll: { flex: 1, backgroundColor: COLORS.cream },
+  resultScreen: { flexGrow: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.cream, paddingHorizontal: 27 },
+  resultScreenCompact: { justifyContent: "flex-start" },
   resultIcon: { width: 105, height: 105, borderRadius: 35, alignItems: "center", justifyContent: "center", marginBottom: 22 },
+  resultIconCompact: { width: 82, height: 82, borderRadius: 28, marginBottom: 16 },
   resultIconPaid: { backgroundColor: COLORS.yellow },
   resultIconPending: { backgroundColor: "#E8EDE9" },
   resultIconFailed: { backgroundColor: "#E8C7C0" },
   eyebrow: { color: COLORS.orange, fontSize: 11, fontWeight: "900", letterSpacing: 1.3 },
-  resultTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 30, fontWeight: "900", textAlign: "center", marginTop: 8 },
+  resultTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 30, textAlign: "center", marginTop: 8 },
+  resultTitleCompact: { fontSize: 26 },
   resultCopy: { maxWidth: 330, color: COLORS.muted, fontSize: 12, lineHeight: 18, textAlign: "center", marginTop: 10 },
   orderCard: { width: "100%", maxWidth: 360, borderRadius: 22, backgroundColor: COLORS.green, alignItems: "center", padding: 18, marginVertical: 22 },
   orderLabel: { color: COLORS.white, fontSize: 11, fontWeight: "900", letterSpacing: 1 },
