@@ -1,28 +1,27 @@
 import { Ionicons } from "@expo/vector-icons";
+import { PlayfairDisplay_800ExtraBold_Italic } from "@expo-google-fonts/playfair-display/800ExtraBold_Italic";
+import { useFonts } from "expo-font";
+import { Image, type ImageSource } from "expo-image";
+import * as SplashScreen from "expo-splash-screen";
 import * as Network from "expo-network";
 import { StatusBar } from "expo-status-bar";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   AppState,
   BackHandler,
   Easing,
-  Image,
   Modal,
-  PixelRatio,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text as NativeText,
   TextInput,
   ToastAndroid,
   View,
   useWindowDimensions,
   type AppStateStatus,
-  type ImageSourcePropType,
-  type TextProps,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
@@ -61,6 +60,13 @@ import {
 } from "./lib/orders";
 import { getOrderItemDisplayDetails } from "./lib/orderDetails";
 import { paymentGateway } from "./lib/payments";
+import { loadHostedProductImageSources, type ProductImageSources } from "./lib/productImages";
+import { getResponsiveLayout } from "./lib/responsive";
+import {
+  DISPLAY_FONT_FAMILY,
+  Text,
+  TypographyScaleContext,
+} from "./lib/typography";
 import {
   clearPaymentCheckpoint,
   isTerminalPaymentStatus,
@@ -74,6 +80,8 @@ import {
   type ProductCustomization,
 } from "./appState";
 
+void SplashScreen.preventAutoHideAsync();
+
 const COLORS = {
   ink: "#153F32",
   cream: "#dee0df",
@@ -83,19 +91,6 @@ const COLORS = {
   muted: "#526659",
   white: "#FFFFFF",
 };
-
-const TypographyScaleContext = createContext(1);
-
-function Text({ maxFontSizeMultiplier = 1.2, ...props }: TextProps) {
-  const typographyScale = useContext(TypographyScaleContext);
-  const flattenedStyle = StyleSheet.flatten(props.style);
-  const responsiveStyle = flattenedStyle?.fontSize ? {
-    fontSize: flattenedStyle.fontSize * typographyScale,
-    lineHeight: flattenedStyle.lineHeight ? flattenedStyle.lineHeight * typographyScale : undefined,
-  } : undefined;
-
-  return <NativeText maxFontSizeMultiplier={maxFontSizeMultiplier} {...props} style={[props.style, responsiveStyle]} />;
-}
 
 const sizeOptions: ProductCustomization["size"][] = ["Small", "Regular", "Large"];
 const temperatureOptions: ProductCustomization["temperature"][] = ["Hot", "Iced"];
@@ -158,7 +153,6 @@ const getConfiguredPrice = (drink: Drink, options: ProductCustomization) => {
 };
 
 type Drink = MenuDrink;
-const drinks = menuDrinks;
 
 function Bolt() {
   return <Text style={styles.bolt}>ϟ</Text>;
@@ -169,16 +163,22 @@ function ProductPhoto({
   name,
   hero = false,
 }: {
-  imageSource: ImageSourcePropType | null;
+  imageSource: ImageSource | null;
   name: string;
   hero?: boolean;
 }) {
-  if (imageSource) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [imageSource]);
+
+  if (imageSource && !failed) {
     return (
       <Image
         source={imageSource}
         style={hero ? styles.productPhotoHero : styles.productPhoto}
-        resizeMode="cover"
+        contentFit="contain"
+        cachePolicy="memory-disk"
+        transition={180}
+        onError={() => setFailed(true)}
         accessibilityLabel={`${name} product photo`}
       />
     );
@@ -199,11 +199,14 @@ function KopiPowApp() {
   const { appUser, isAuthenticated, session } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const screenAspectRatio = Math.max(screenWidth, screenHeight) / Math.min(screenWidth, screenHeight);
-  const isClassicWidePhone = screenAspectRatio < 1.9;
-  const cappedSystemFontScale = Math.min(PixelRatio.getFontScale(), 1.2);
-  const targetFontScale = isClassicWidePhone ? 1.24 : screenWidth >= 400 ? 1.18 : screenWidth < 350 ? 1.08 : 1.12;
-  const typographyScale = Math.max(1, targetFontScale / cappedSystemFontScale);
+  const responsiveLayout = getResponsiveLayout(screenWidth, screenHeight);
+  const typographyScale = responsiveLayout.typographyScale;
+  const responsiveContentStyle = {
+    alignSelf: "center" as const,
+    maxWidth: responsiveLayout.contentMaxWidth,
+    paddingHorizontal: responsiveLayout.gutter,
+    width: "100%" as const,
+  };
   const [showSplash, setShowSplash] = useState(true);
   const [maintenanceConfig, setMaintenanceConfig] = useState<MaintenanceConfig | null>(null);
   const [activeTab, setActiveTab] = useState<"Home" | "Menu" | "Cart" | "Rewards" | "Profile">("Home");
@@ -227,6 +230,7 @@ function KopiPowApp() {
   const [customization, setCustomization] = useState<ProductCustomization>(defaultCustomization);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [productImageSources, setProductImageSources] = useState<ProductImageSources>({});
   const splashOpacity = useRef(new Animated.Value(0)).current;
   const splashScale = useRef(new Animated.Value(0.72)).current;
   const chargingProgress = useRef(new Animated.Value(0)).current;
@@ -254,6 +258,10 @@ function KopiPowApp() {
   accountUserIdRef.current = session?.user.id ?? null;
   networkAvailableRef.current = networkAvailable;
   const currentUser = appUser;
+  const drinks = menuDrinks.map((drink) => ({
+    ...drink,
+    imageSource: productImageSources[drink.id] ?? null,
+  }));
   const cartItemCount = cart.items.reduce((total, item) => total + item.quantity, 0);
   const cartSubtotal = cart.items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
   const latestPendingOrder = orders.find((order) => order.status === "pending") ?? null;
@@ -666,6 +674,17 @@ function KopiPowApp() {
   }, [session?.user.id, ordersRefreshVersion]);
 
   useEffect(() => {
+    if (!networkAvailable) return;
+    let isMounted = true;
+    void loadHostedProductImageSources().then((sources) => {
+      if (isMounted) setProductImageSources(sources);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [networkAvailable, refreshVersion]);
+
+  useEffect(() => {
     const userId = session?.user.id;
     if (!userId || !networkAvailable || appStateRef.current !== "active" || paymentRecoveryInFlight.current) return;
 
@@ -876,9 +895,11 @@ function KopiPowApp() {
                 ? { opacity: 1, transform: [{ scale: 1 }] }
                 : { opacity: splashOpacity, transform: [{ scale: splashScale }] },
             ]}>
-              <View style={styles.splashLogoMark}><Text style={styles.splashBolt}>ϟ</Text></View>
-              <Text style={styles.splashName}>Kopi POW!</Text>
-              <Text style={styles.splashTagline}>99% REAAAADY TO GOW</Text>
+              <View style={[styles.splashLogoMark, responsiveLayout.isCompact && styles.splashLogoMarkCompact, responsiveLayout.isTablet && styles.splashLogoMarkTablet]}>
+                <Text style={[styles.splashBolt, responsiveLayout.isCompact && styles.splashBoltCompact, responsiveLayout.isTablet && styles.splashBoltTablet]}>ϟ</Text>
+              </View>
+              <Text style={[styles.splashName, responsiveLayout.isCompact && styles.splashNameCompact, responsiveLayout.isTablet && styles.splashNameTablet]}>Kopi POW!</Text>
+              <Text style={[styles.splashTagline, responsiveLayout.isCompact && styles.splashTaglineCompact]}>99% REAAAADY TO GOW</Text>
             </Animated.View>
           </SafeAreaView>
       </TypographyScaleContext.Provider>
@@ -889,10 +910,10 @@ function KopiPowApp() {
 
   if (maintenanceConfig.enabled && !maintenanceMustWaitForPayment) {
     return (
-      <>
+      <TypographyScaleContext.Provider value={typographyScale}>
         <MaintenanceScreen message={maintenanceConfig.message} />
         <AppUpdateManager blocked={false} networkAvailable={networkAvailable} />
-      </>
+      </TypographyScaleContext.Provider>
     );
   }
 
@@ -972,7 +993,7 @@ function KopiPowApp() {
             }}
           />
         ) : <>
-        {activeTab === "Home" ? <ScrollView key={`home-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.scrollContent, { paddingTop: 14 + insets.top, paddingBottom: 118 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+        {activeTab === "Home" ? <ScrollView key={`home-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.scrollContent, responsiveContentStyle, { paddingTop: 14 + insets.top, paddingBottom: 118 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -1014,9 +1035,9 @@ function KopiPowApp() {
         <View style={styles.powerCardShadow}>
           <View style={styles.powerCard} collapsable={false}>
             <View style={styles.powerCardCopy}>
-              <Text style={styles.powerKicker}>TODAY&apos;S POWER-UP</Text>
-              <Text style={styles.powerTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78}>Iced Power Latte!</Text>
-              <Text style={styles.powerDetail}>Oat milk · less sweet · double shot</Text>
+              <Text style={styles.powerKicker}>TODAY&apos;S POWER UP</Text>
+              <Text style={styles.powerTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Iced Power Latte!</Text>
+              {/* <Text style={styles.powerDetail}>Oat milk · less sweet · double shot</Text> */}
               <Pressable style={styles.quickOrder} onPress={() => openCustomizer(drinks[0])}>
                 <Text style={styles.quickOrderText}>Order today&apos;s pick</Text>
                 <Text style={styles.quickOrderArrow}>→</Text>
@@ -1063,20 +1084,23 @@ function KopiPowApp() {
           ))}
         </ScrollView>
 
-        <View style={styles.rewardCard}>
-          <View style={styles.rewardIcon}><Text style={styles.powText}>POW!</Text></View>
-          <View style={styles.rewardCopy}>
-            <Text style={styles.rewardTitle}>4 more sips to a free drink</Text>
-            <Text style={styles.rewardDetail}>You&apos;re 60% powered</Text>
-            <View style={styles.progressTrack}><View style={styles.progressFill} /></View>
+        {isAuthenticated && (
+          <View style={styles.rewardCard}>
+            <View style={styles.rewardIcon}><Text style={styles.powText}>POW!</Text></View>
+            <View style={styles.rewardCopy}>
+              <Text style={styles.rewardTitle}>4 more sips to a free drink</Text>
+              <Text style={styles.rewardDetail}>You&apos;re 60% powered</Text>
+              <View style={styles.progressTrack}><View style={styles.progressFill} /></View>
+            </View>
+            <Text style={styles.rewardArrow}>›</Text>
           </View>
-          <Text style={styles.rewardArrow}>›</Text>
-        </View>
+        )}
       </ScrollView> : activeTab === "Menu" ? (
         <MenuScreen
           key={`menu-screen-${refreshVersion}`}
           activeCategory={activeCategory}
           currentUserInitials={currentUser.initials}
+          drinks={drinks}
           onActiveCategoryChange={setActiveCategory}
           onCustomizeDrink={openCustomizer}
           onOpenProfile={() => setActiveTab("Profile")}
@@ -1085,7 +1109,7 @@ function KopiPowApp() {
           searchQuery={searchQuery}
           typographyScale={typographyScale}
         />
-      ) : activeTab === "Rewards" ? <ScrollView key={`rewards-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.rewardsPage, { paddingTop: 14 + insets.top, paddingBottom: 108 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      ) : activeTab === "Rewards" ? <ScrollView key={`rewards-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.rewardsPage, responsiveContentStyle, { paddingTop: 14 + insets.top, paddingBottom: 108 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -1123,7 +1147,7 @@ function KopiPowApp() {
           <Text style={styles.comingSoonTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.74}>Something powerful{`\n`}is coming!</Text>
           <Text style={styles.comingSoonCopy}>We&apos;re brewing a rewards experience worth waiting for. Check back soon.</Text>
         </View>
-      </ScrollView> : activeTab === "Cart" ? <ScrollView key={`cart-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.cartContent, { paddingTop: 14 + insets.top, paddingBottom: 128 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
+      </ScrollView> : activeTab === "Cart" ? <ScrollView key={`cart-screen-${refreshVersion}`} style={styles.screen} contentContainerStyle={[styles.cartContent, responsiveContentStyle, { paddingTop: 14 + insets.top, paddingBottom: 128 + insets.bottom }]} showsVerticalScrollIndicator={false} removeClippedSubviews={false} refreshControl={pullToRefresh}>
         <View style={styles.topBar}>
           <View style={styles.logoRow}>
             <View style={styles.logoMark}><Bolt /></View>
@@ -1261,8 +1285,10 @@ function KopiPowApp() {
         <View style={[
           styles.bottomNav,
           {
-            height: 78 + insets.bottom,
-            paddingBottom: 4 + insets.bottom,
+            bottom: 0,
+            height: (responsiveLayout.isCompact ? 68 : 74) + insets.bottom,
+            paddingBottom: Math.max(4, insets.bottom),
+            paddingHorizontal: responsiveLayout.isTablet ? Math.max(0, (screenWidth - 720) / 2) : 0,
           },
         ]}>
           <Pressable style={styles.navItem} onPress={() => setActiveTab("Home")}>
@@ -1273,7 +1299,7 @@ function KopiPowApp() {
             <Ionicons name={activeTab === "Menu" ? "grid" : "grid-outline"} size={23} color={activeTab === "Menu" ? COLORS.orange : "#9B9C95"} />
             <Text style={activeTab === "Menu" ? styles.navLabelActive : styles.navLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Menu</Text>
           </Pressable>
-          <Pressable style={[styles.cartButton, activeTab === "Cart" && styles.cartButtonActive]} accessibilityLabel={`Cart with ${cartItemCount} items`} onPress={() => setActiveTab("Cart")}>
+          <Pressable style={[styles.cartButton, responsiveLayout.isCompact && styles.cartButtonCompact, activeTab === "Cart" && styles.cartButtonActive]} accessibilityLabel={`Cart with ${cartItemCount} items`} onPress={() => setActiveTab("Cart")}>
             <Ionicons name="cart-outline" size={29} color={COLORS.white} />
             {cartItemCount > 0 && <View style={styles.cartBadge}><Text style={styles.cartBadgeText}>{cartItemCount}</Text></View>}
           </Pressable>
@@ -1290,7 +1316,13 @@ function KopiPowApp() {
 
         <Modal visible={selectedDrink !== null} transparent animationType="slide" onRequestClose={closeCustomizer}>
           <View style={styles.modalBackdrop}>
-            <View style={styles.customizerSheet}>
+            <View style={[
+              styles.customizerSheet,
+              {
+                height: responsiveLayout.isCompact ? "94%" : "88%",
+                maxWidth: responsiveLayout.isTablet ? 720 : undefined,
+              },
+            ]}>
               {selectedDrink && <>
                 <View style={styles.customizerHandle} />
                 <View style={styles.customizerHeader}>
@@ -1343,11 +1375,18 @@ function KopiPowApp() {
                   <View style={styles.optionGroup}>
                     <Text style={styles.optionTitle}>Notes · optional</Text>
                     <TextInput
-                      style={styles.noteInput}
+                      style={[
+                        styles.noteInput,
+                        {
+                          fontSize: 11 * typographyScale,
+                          lineHeight: 16 * typographyScale,
+                        },
+                      ]}
                       value={customization.note}
                       onChangeText={(note) => setCustomization((current) => ({ ...current, note }))}
                       placeholder={selectedDrink.category === "Snacks" ? "Example: warm it up, please" : "Example: extra hot, no straw"}
                       placeholderTextColor="#8A9188"
+                      maxFontSizeMultiplier={1.2}
                       maxLength={120}
                       multiline
                     />
@@ -1382,6 +1421,20 @@ function KopiPowApp() {
 }
 
 export default function App() {
+  const [fontsLoaded, fontError] = useFonts({
+    [DISPLAY_FONT_FAMILY]: PlayfairDisplay_800ExtraBold_Italic,
+  });
+
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      void SplashScreen.hideAsync();
+    }
+  }, [fontError, fontsLoaded]);
+
+  if (!fontsLoaded && !fontError) {
+    return null;
+  }
+
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" hidden={false} translucent backgroundColor="transparent" />
@@ -1396,9 +1449,16 @@ const styles = StyleSheet.create({
   splashSafeArea: { flex: 1, backgroundColor: COLORS.cream, alignItems: "center", justifyContent: "center" },
   splashLogo: { alignItems: "center", justifyContent: "center" },
   splashLogoMark: { width: 92, height: 92, borderRadius: 30, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-5deg" }], marginBottom: 22 },
+  splashLogoMarkCompact: { width: 74, height: 74, borderRadius: 24, marginBottom: 17 },
+  splashLogoMarkTablet: { width: 112, height: 112, borderRadius: 36, marginBottom: 28 },
   splashBolt: { color: COLORS.green, fontSize: 67, fontWeight: "900", lineHeight: 73 },
+  splashBoltCompact: { fontSize: 54, lineHeight: 60 },
+  splashBoltTablet: { fontSize: 82, lineHeight: 90 },
   splashName: { color: COLORS.ink, fontSize: 39, fontWeight: "900", fontStyle: "italic", letterSpacing: -2.2 },
+  splashNameCompact: { fontSize: 33 },
+  splashNameTablet: { fontSize: 48 },
   splashTagline: { color: COLORS.muted, fontSize: 9, fontWeight: "900", letterSpacing: 2.3, marginTop: 7 },
+  splashTaglineCompact: { fontSize: 8, letterSpacing: 1.9, marginTop: 5 },
   safeArea: { flex: 1, backgroundColor: COLORS.cream },
   screen: { flex: 1, backgroundColor: COLORS.cream },
   rewardsPage: { flexGrow: 1, backgroundColor: COLORS.cream, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 108 },
@@ -1408,7 +1468,7 @@ const styles = StyleSheet.create({
   comingSoonEyebrowOutline: { borderWidth: 1.5, borderColor: COLORS.green, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 8, marginBottom: 14, overflow: "hidden" },
   chargingGlow: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(32, 76, 59, 0.14)" },
   comingSoonEyebrow: { color: COLORS.green, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.7, zIndex: 1 },
-  comingSoonTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 36, lineHeight: 39, fontWeight: "900", letterSpacing: -1.3, textAlign: "center" },
+  comingSoonTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 36, lineHeight: 39, letterSpacing: -1.3, textAlign: "center" },
   comingSoonCopy: { color: COLORS.muted, fontSize: 13, lineHeight: 20, textAlign: "center", maxWidth: 300, marginTop: 16 },
   scrollContent: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 118 },
   cartContent: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 128 },
@@ -1424,7 +1484,7 @@ const styles = StyleSheet.create({
   cartSignInText: { color: COLORS.white, fontSize: 8.5, fontWeight: "900" },
   emptyCart: { alignItems: "center", justifyContent: "center", paddingTop: 72, paddingHorizontal: 30 },
   emptyCartIcon: { width: 104, height: 104, borderRadius: 34, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginBottom: 25 },
-  emptyCartTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 27, textAlign: "center" },
+  emptyCartTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 27, textAlign: "center" },
   emptyCartCopy: { color: COLORS.muted, fontSize: 12, lineHeight: 18, textAlign: "center", maxWidth: 260, marginTop: 10 },
   browseMenuButton: { backgroundColor: COLORS.green, borderRadius: 22, paddingHorizontal: 22, paddingVertical: 13, marginTop: 23 },
   browseMenuButtonText: { color: COLORS.white, fontSize: 11, fontWeight: "900" },
@@ -1433,7 +1493,7 @@ const styles = StyleSheet.create({
   cartItemVisual: { width: 72, minHeight: 94, borderRadius: 15, alignItems: "center", justifyContent: "center", marginRight: 12 },
   cartItemBody: { flex: 1 },
   cartItemTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  cartItemName: { flex: 1, color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 17, fontWeight: "900" },
+  cartItemName: { flex: 1, color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 17 },
   cartItemOptions: { color: COLORS.muted, fontSize: 8.5, lineHeight: 13, marginTop: 3 },
   cartItemExtrasLabel: { color: COLORS.orange, fontSize: 8.5, lineHeight: 13, fontWeight: "900", marginTop: 5 },
   cartItemExtra: { color: COLORS.orange, fontSize: 8.5, lineHeight: 13, fontWeight: "800", marginTop: 1 },
@@ -1450,7 +1510,7 @@ const styles = StyleSheet.create({
   summaryValue: { color: COLORS.white, fontSize: 11, fontWeight: "800" },
   summaryMuted: { color: "#AAB5AC", fontSize: 11, fontWeight: "800" },
   summaryDivider: { height: 1, backgroundColor: "#4B6B5D", marginVertical: 7 },
-  summaryTotalLabel: { color: COLORS.yellow, fontFamily: "serif", fontStyle: "italic", fontSize: 17, fontWeight: "900" },
+  summaryTotalLabel: { color: COLORS.yellow, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 17 },
   summaryTotal: { color: COLORS.yellow, fontSize: 17, fontWeight: "900" },
   summaryNote: { color: "#AEBBB1", fontSize: 8, lineHeight: 12, marginTop: 6 },
   checkoutButton: { minHeight: 54, backgroundColor: COLORS.orange, borderRadius: 22, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 18, marginTop: 14 },
@@ -1474,23 +1534,23 @@ const styles = StyleSheet.create({
   greetingBlock: { paddingTop: 34, paddingBottom: 24, position: "relative" },
   greetingBlockNoPendingOrder: { paddingTop: 0, paddingBottom: 38 },
   greeting: { color: COLORS.muted, fontSize: 13, marginBottom: 8 },
-  headline: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 42, lineHeight: 47, letterSpacing: -1.7, paddingBottom: 7, marginBottom: -7 },
+  headline: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 42, lineHeight: 47, letterSpacing: -1.7, paddingBottom: 7, marginBottom: -7 },
   headlineBolt: { position: "absolute", right: 8, bottom: 24, width: 48, height: 48, borderRadius: 16, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "8deg" }] },
   menuEyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 6 },
-  menuTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 43, lineHeight: 47, letterSpacing: -1.5 },
+  menuTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 43, lineHeight: 47, letterSpacing: -1.5 },
   powerCardShadow: { borderRadius: 26, marginBottom: 34, shadowColor: "#071B14", shadowOpacity: 0.42, shadowOffset: { width: 0, height: 12 }, shadowRadius: 16, elevation: 12 },
-  powerCard: { minHeight: 208, borderRadius: 26, backgroundColor: COLORS.ink, overflow: "hidden", flexDirection: "row" },
+  powerCard: { minHeight: 185, borderRadius: 26, backgroundColor: COLORS.ink, overflow: "hidden", flexDirection: "row" },
   powerCardCopy: { width: "60%", padding: 21, zIndex: 2 },
   powerKicker: { color: "#D9E0D4", fontSize: 7, fontWeight: "800", letterSpacing: 1.35, marginBottom: 11 },
-  powerTitle: { color: COLORS.yellow, fontFamily: "serif", fontStyle: "italic", fontSize: 25, fontWeight: "900" },
+  powerTitle: { color: COLORS.yellow, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 26 },
   powerDetail: { color: "#CDD5C8", fontSize: 9, lineHeight: 14, marginTop: 7 },
   quickOrder: { marginTop: 20, flexDirection: "row", alignItems: "center", alignSelf: "flex-start", backgroundColor: COLORS.orange, paddingLeft: 14, paddingRight: 10, paddingVertical: 10, borderRadius: 18 },
-  quickOrderText: { color: COLORS.white, fontSize: 9, fontWeight: "800" },
+  quickOrderText: { color: COLORS.white, fontSize: 8, fontWeight: "800" },
   quickOrderArrow: { color: COLORS.white, marginLeft: 11, fontWeight: "900" },
-  heroCupWrap: { flex: 1, alignItems: "center", justifyContent: "flex-end", position: "relative" },
+  heroCupWrap: { flex: 1, minWidth: 0, alignItems: "center", justifyContent: "flex-start", position: "relative" },
   heroSun: { position: "absolute", top: 28, width: 130, height: 130, borderRadius: 65, backgroundColor: COLORS.yellow },
   productPhoto: { width: "100%", height: "100%", borderRadius: 14 },
-  productPhotoHero: { width: "84%", maxWidth: 118, aspectRatio: 0.78, borderRadius: 18 },
+  productPhotoHero: { position: "absolute", top: 8, width: "100%", maxWidth: 160, height: 190, borderRadius: 18 },
   productPhotoPlaceholderBase: { borderRadius: 15, borderWidth: 1.5, borderStyle: "dashed", borderColor: COLORS.green, alignItems: "center", justifyContent: "center", paddingHorizontal: 8, zIndex: 2 },
   productPhotoPlaceholder: { width: "78%", height: "68%", backgroundColor: "rgba(255, 255, 255, 0.94)" },
   productPhotoPlaceholderHero: { width: "84%", maxWidth: 118, aspectRatio: 0.78, borderColor: "#DDE3DF", backgroundColor: "rgba(255, 255, 255, 0.96)" },
@@ -1499,12 +1559,12 @@ const styles = StyleSheet.create({
   productPhotoName: { color: COLORS.ink, fontSize: 8.5, lineHeight: 11, fontWeight: "800", textAlign: "center", marginTop: 3 },
   sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 },
   sectionEyebrow: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.4, marginBottom: 5 },
-  sectionTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 25, fontWeight: "900", paddingBottom: 5, marginBottom: -5 },
+  sectionTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 25, paddingBottom: 5, marginBottom: -5 },
   drinkRow: { gap: 13, paddingBottom: 28 },
   drinkCard: { width: 174, backgroundColor: COLORS.white, borderRadius: 20, padding: 10 },
   drinkVisual: { height: 153, borderRadius: 14, alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  drinkTag: { position: "absolute", left: 10, top: 10, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 12, borderWidth: 2, borderColor: COLORS.green, paddingHorizontal: 11, paddingVertical: 7, fontSize: 9.5, fontWeight: "900", letterSpacing: 0.8, zIndex: 5, shadowColor: "#000", shadowOpacity: 0.2, shadowOffset: { width: 0, height: 3 }, shadowRadius: 4, elevation: 5 },
-  drinkName: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 17, lineHeight: 20, fontWeight: "900", minHeight: 40, marginTop: 12 },
+  drinkTag: { position: "absolute", left: 8, top: 8, color: COLORS.green, backgroundColor: COLORS.white, borderRadius: 9, borderWidth: 1.5, borderColor: COLORS.green, paddingHorizontal: 8, paddingVertical: 5, fontSize: 6.5, fontWeight: "900", letterSpacing: 0.6, zIndex: 5, shadowColor: "#000", shadowOpacity: 0.2, shadowOffset: { width: 0, height: 2 }, shadowRadius: 3, elevation: 4 },
+  drinkName: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 17, lineHeight: 20, minHeight: 40, marginTop: 12 },
   drinkDetail: { color: COLORS.muted, fontSize: 8, lineHeight: 12, minHeight: 24, marginTop: 5 },
   drinkBottom: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 },
   drinkPrice: { color: COLORS.ink, fontSize: 11, fontWeight: "900" },
@@ -1512,7 +1572,7 @@ const styles = StyleSheet.create({
   addButtonText: { color: COLORS.white, fontSize: 16, fontWeight: "800", marginTop: -2 },
   rewardCard: { flexDirection: "row", alignItems: "center", backgroundColor: COLORS.ink, borderRadius: 20, padding: 15 },
   rewardIcon: { width: 46, height: 46, borderRadius: 15, backgroundColor: COLORS.orange, alignItems: "center", justifyContent: "center", marginRight: 13 },
-  powText: { color: COLORS.green, fontSize: 11, fontWeight: "900", fontStyle: "italic", transform: [{ rotate: "-8deg" }] },
+  powText: { color: COLORS.green, fontSize: 9, fontWeight: "900", fontStyle: "italic", transform: [{ rotate: "-8deg" }] },
   rewardCopy: { flex: 1 },
   rewardTitle: { color: COLORS.white, fontSize: 12, fontWeight: "800" },
   rewardDetail: { color: "#AEB0A9", fontSize: 8, marginTop: 4 },
@@ -1520,11 +1580,11 @@ const styles = StyleSheet.create({
   progressFill: { width: "60%", height: "100%", backgroundColor: COLORS.yellow },
   rewardArrow: { color: COLORS.white, fontSize: 26, marginLeft: 14 },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 34, 27, 0.48)" },
-  customizerSheet: { height: "88%", backgroundColor: COLORS.cream, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingTop: 10, overflow: "hidden" },
+  customizerSheet: { width: "100%", height: "88%", alignSelf: "center", backgroundColor: COLORS.cream, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingTop: 10, overflow: "hidden" },
   customizerHandle: { width: 46, height: 5, borderRadius: 3, backgroundColor: "#8C9791", alignSelf: "center", marginBottom: 13 },
   customizerHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingHorizontal: 20, paddingBottom: 15 },
   customizerEyebrow: { color: COLORS.orange, fontSize: 9, fontWeight: "900", letterSpacing: 1.4, marginBottom: 5 },
-  customizerTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 29, fontWeight: "900", letterSpacing: -0.8 },
+  customizerTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 29, letterSpacing: -0.8 },
   customizerBasePrice: { color: COLORS.muted, fontSize: 10, fontWeight: "600", marginTop: 4 },
   closeButton: { width: 40, height: 40, borderRadius: 14, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center" },
   customizerScroll: { flex: 1 },
@@ -1541,11 +1601,12 @@ const styles = StyleSheet.create({
   addConfiguredButton: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: COLORS.green, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 15 },
   addConfiguredText: { color: COLORS.white, fontSize: 12, fontWeight: "900" },
   addConfiguredPrice: { color: COLORS.yellow, fontSize: 12, fontWeight: "900" },
-  bottomNav: { position: "absolute", left: 0, right: 0, bottom: -15, height: 78, backgroundColor: COLORS.white, borderTopWidth: 1, borderColor: "#E1E6E3", flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingBottom: 4 },
+  bottomNav: { position: "absolute", left: 0, right: 0, bottom: 0, height: 74, backgroundColor: COLORS.white, borderTopWidth: 1, borderColor: "#E1E6E3", flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingBottom: 4 },
   navItem: { width: 60, alignItems: "center", justifyContent: "center", gap: 4 },
   navLabel: { color: "#9B9C95", fontSize: 10.5, fontWeight: "700" },
   navLabelActive: { color: COLORS.orange, fontSize: 10.5, fontWeight: "900" },
   cartButton: { width: 58, height: 58, marginTop: -30, borderRadius: 20, backgroundColor: COLORS.ink, borderWidth: 5, borderColor: COLORS.cream, alignItems: "center", justifyContent: "center" },
+  cartButtonCompact: { width: 52, height: 52, marginTop: -24, borderRadius: 18 },
   cartButtonActive: { backgroundColor: COLORS.orange },
   cartBadge: { position: "absolute", top: -7, right: -7, minWidth: 21, height: 21, borderRadius: 11, backgroundColor: COLORS.orange, borderWidth: 2, borderColor: COLORS.white, alignItems: "center", justifyContent: "center" },
   cartBadgeText: { color: COLORS.white, fontSize: 8, fontWeight: "900" },

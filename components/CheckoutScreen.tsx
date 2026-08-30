@@ -7,7 +7,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from "react-native";
@@ -19,6 +18,8 @@ import {
   type CheckoutOrder,
 } from "../lib/cart";
 import { getOrderItemDisplayDetails } from "../lib/orderDetails";
+import { useResponsiveLayout } from "../lib/responsive";
+import { DISPLAY_FONT_FAMILY, Text } from "../lib/typography";
 
 const COLORS = {
   ink: "#153F32",
@@ -53,6 +54,7 @@ export function CheckoutScreen({
   onSubmissionStateChange,
 }: CheckoutScreenProps) {
   const insets = useSafeAreaInsets();
+  const responsiveLayout = useResponsiveLayout();
   const [name, setName] = useState(customerName);
   const [phone, setPhone] = useState("");
   const [customerNote, setCustomerNote] = useState("");
@@ -104,6 +106,12 @@ export function CheckoutScreen({
       <ScrollView
         contentContainerStyle={[
           styles.content,
+          {
+            alignSelf: "center",
+            maxWidth: responsiveLayout.contentMaxWidth,
+            paddingHorizontal: responsiveLayout.gutter,
+            width: "100%",
+          },
           { paddingTop: 16 + insets.top, paddingBottom: 42 + insets.bottom },
         ]}
         keyboardShouldPersistTaps="handled"
@@ -116,12 +124,12 @@ export function CheckoutScreen({
         }}
       >
         <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={onBack} accessibilityLabel="Return to cart">
+          <Pressable style={[styles.backButton, responsiveLayout.isCompact && styles.backButtonNarrow]} onPress={onBack} accessibilityLabel="Return to cart">
             <Ionicons name="arrow-back" size={23} color={COLORS.green} />
           </Pressable>
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>SECURE CHECKOUT</Text>
-            <Text style={styles.title}>Almost powered up!</Text>
+            <Text style={[styles.title, responsiveLayout.isCompact && styles.titleNarrow]}>Almost powered up!</Text>
           </View>
         </View>
 
@@ -133,7 +141,7 @@ export function CheckoutScreen({
           </View>
         </View>
 
-        <View style={styles.card}>
+        <View style={[styles.card, responsiveLayout.isCompact && styles.cardNarrow]}>
           <View style={styles.cardHeading}>
             <View style={styles.cardIcon}><Ionicons name="bag-handle-outline" size={21} color={COLORS.green} /></View>
             <View>
@@ -146,7 +154,7 @@ export function CheckoutScreen({
             const details = getOrderItemDisplayDetails(item.customization);
             return (
               <View key={item.lineId} style={styles.orderLine}>
-                <Text style={styles.orderLineQuantity}>{item.quantity}×</Text>
+                <Text style={[styles.orderLineQuantity, responsiveLayout.isCompact && styles.orderLineQuantityNarrow]}>{item.quantity}×</Text>
                 <View style={styles.orderLineCopy}>
                   <Text style={styles.orderLineName}>{item.name}</Text>
                   {details.primary && <Text style={styles.orderLineDetail}>{details.primary}</Text>}
@@ -161,7 +169,7 @@ export function CheckoutScreen({
                   )}
                   {item.note.length > 0 && <Text style={styles.orderLineNote}>“{item.note}”</Text>}
                 </View>
-                <Text style={styles.orderLinePrice}>{formatRupiah(item.unitPrice * item.quantity)}</Text>
+                <Text style={[styles.orderLinePrice, responsiveLayout.isCompact && styles.orderLinePriceNarrow]}>{formatRupiah(item.unitPrice * item.quantity)}</Text>
               </View>
             );
           })}
@@ -174,7 +182,7 @@ export function CheckoutScreen({
           <Text style={styles.totalNote}>The server recalculates catalog prices before creating the order.</Text>
         </View>
 
-        <View style={styles.card}>
+        <View style={[styles.card, responsiveLayout.isCompact && styles.cardNarrow]}>
           <View style={styles.cardHeading}>
             <View style={styles.cardIcon}><Ionicons name="person-outline" size={21} color={COLORS.green} /></View>
             <View>
@@ -185,39 +193,46 @@ export function CheckoutScreen({
 
           <Text style={styles.inputLabel}>NAME</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { fontSize: 18 * responsiveLayout.typographyScale }]}
             value={name}
             onChangeText={setName}
             placeholder="Pickup name"
             placeholderTextColor="#7E897F"
+            maxFontSizeMultiplier={1.2}
             maxLength={80}
             autoCapitalize="words"
           />
 
           <Text style={styles.inputLabel}>PHONE · OPTIONAL</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { fontSize: 18 * responsiveLayout.typographyScale }]}
             value={phone}
             onChangeText={setPhone}
             placeholder="Example: +62 812 3456 7890"
             placeholderTextColor="#7E897F"
+            maxFontSizeMultiplier={1.2}
             keyboardType="phone-pad"
             maxLength={20}
           />
 
           <Text style={styles.inputLabel}>ORDER NOTE · OPTIONAL</Text>
           <TextInput
-            style={[styles.input, styles.noteInput]}
+            style={[
+              styles.input,
+              styles.noteInput,
+              { fontSize: 18 * responsiveLayout.typographyScale },
+            ]}
             value={customerNote}
             onChangeText={setCustomerNote}
             placeholder="Anything the counter should know?"
             placeholderTextColor="#7E897F"
+            maxFontSizeMultiplier={1.2}
             maxLength={240}
             multiline
           />
         </View>
 
-        <View style={styles.card}>
+        <View style={[styles.card, responsiveLayout.isCompact && styles.cardNarrow]}>
           <View style={styles.cardHeading}>
             <View style={styles.cardIcon}><Ionicons name="wallet-outline" size={21} color={COLORS.green} /></View>
             <View>
@@ -292,7 +307,7 @@ export function CheckoutScreen({
 
       {showFloatingBack && (
         <Pressable
-          style={styles.floatingBackButton}
+          style={[styles.floatingBackButton, { left: responsiveLayout.gutter, top: 18 + insets.top }]}
           onPress={onBack}
           accessibilityLabel="Return to cart"
         >
@@ -308,20 +323,24 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 42 },
   header: { flexDirection: "row", alignItems: "center", marginBottom: 20 },
   backButton: { width: 46, height: 46, borderRadius: 16, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", marginRight: 13 },
+  backButtonNarrow: { width: 42, height: 42, borderRadius: 14, marginRight: 10 },
   headerCopy: { flex: 1 },
   eyebrow: { color: COLORS.orange, fontSize: 16.5, fontWeight: "900", letterSpacing: 1.3 },
-  title: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontSize: 43.5, lineHeight: 52, fontWeight: "900", marginTop: 2 },
+  title: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 43.5, lineHeight: 52, marginTop: 2 },
+  titleNarrow: { fontSize: 35, lineHeight: 41 },
   accountPill: { flexDirection: "row", alignItems: "center", backgroundColor: "#EEF2EF", borderRadius: 17, paddingHorizontal: 14, paddingVertical: 11, marginBottom: 13 },
   accountCopy: { flex: 1, marginLeft: 10 },
   accountTitle: { color: COLORS.ink, fontSize: 16.5, fontWeight: "800" },
   accountEmail: { color: COLORS.muted, fontSize: 13.5, marginTop: 2 },
   card: { backgroundColor: COLORS.white, borderRadius: 24, padding: 17, marginBottom: 13, borderWidth: 1, borderColor: "#DDE4DF" },
+  cardNarrow: { padding: 14, borderRadius: 19 },
   cardHeading: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
   cardIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#E8EDE9", alignItems: "center", justifyContent: "center", marginRight: 11 },
   cardTitle: { color: COLORS.ink, fontSize: 22.5, fontWeight: "900" },
   cardSubtitle: { color: COLORS.muted, fontSize: 13.5, lineHeight: 18, marginTop: 3 },
   orderLine: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 8 },
   orderLineQuantity: { color: COLORS.orange, fontSize: 16.5, fontWeight: "900", width: 36 },
+  orderLineQuantityNarrow: { width: 28, fontSize: 14 },
   orderLineCopy: { flex: 1 },
   orderLineName: { color: COLORS.ink, fontSize: 16.5, fontWeight: "800" },
   orderLineDetail: { color: COLORS.muted, fontSize: 12.75, lineHeight: 18, marginTop: 2 },
@@ -329,6 +348,7 @@ const styles = StyleSheet.create({
   orderLineExtra: { color: COLORS.orange, fontSize: 12.75, lineHeight: 18, fontWeight: "800", marginTop: 1 },
   orderLineNote: { color: COLORS.orange, fontSize: 12.75, lineHeight: 18, fontStyle: "italic", marginTop: 5 },
   orderLinePrice: { color: COLORS.ink, fontSize: 15, fontWeight: "800" },
+  orderLinePriceNarrow: { fontSize: 12, marginLeft: 5 },
   divider: { height: 1, backgroundColor: "#DDE3DF", marginVertical: 10 },
   totalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   totalLabel: { color: COLORS.ink, fontSize: 18, fontWeight: "900" },
@@ -353,7 +373,7 @@ const styles = StyleSheet.create({
   floatingBackButton: { position: "absolute", top: 18, left: 20, zIndex: 10, elevation: 8, width: 50, height: 50, borderRadius: 18, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#DDE4DF", shadowColor: "#122D24", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
   successScreen: { flex: 1, backgroundColor: COLORS.cream, alignItems: "center", justifyContent: "center", paddingHorizontal: 27 },
   successBurst: { width: 110, height: 110, borderRadius: 38, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginBottom: 24, transform: [{ rotate: "-3deg" }] },
-  successTitle: { color: COLORS.ink, fontFamily: "serif", fontStyle: "italic", fontWeight: "900", fontSize: 46.5, textAlign: "center", marginTop: 8 },
+  successTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 46.5, textAlign: "center", marginTop: 8 },
   successCopy: { color: COLORS.muted, fontSize: 16.5, lineHeight: 25.5, textAlign: "center", maxWidth: 310, marginTop: 11 },
   orderCodeCard: { width: "100%", maxWidth: 360, backgroundColor: COLORS.green, borderRadius: 24, alignItems: "center", padding: 20, marginVertical: 24 },
   orderCodeLabel: { color: "#B9C9BC", fontSize: 13.5, fontWeight: "900", letterSpacing: 1.4 },

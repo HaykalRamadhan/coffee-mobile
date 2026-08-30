@@ -5,8 +5,8 @@ import {
   AppState,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
-  Text,
   View,
   type AppStateStatus,
 } from "react-native";
@@ -18,6 +18,8 @@ import {
   installExpoUpdate,
   type AvailableAppUpdate,
 } from "../lib/appUpdates";
+import { useResponsiveLayout } from "../lib/responsive";
+import { DISPLAY_FONT_FAMILY, Text } from "../lib/typography";
 
 const CHECK_THROTTLE_MS = 15 * 60 * 1000;
 
@@ -27,6 +29,7 @@ type AppUpdateManagerProps = {
 };
 
 export function AppUpdateManager({ blocked, networkAvailable }: AppUpdateManagerProps) {
+  const responsiveLayout = useResponsiveLayout();
   const [availableUpdate, setAvailableUpdate] = useState<AvailableAppUpdate | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -124,8 +127,13 @@ export function AppUpdateManager({ blocked, networkAvailable }: AppUpdateManager
       visible
       onRequestClose={() => { if (!isMandatory && !isInstalling) void postpone(); }}
     >
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
+      <ScrollView
+        style={styles.modalScroll}
+        contentContainerStyle={[styles.backdrop, { paddingHorizontal: responsiveLayout.gutter }]}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.card, responsiveLayout.isCompact && styles.cardCompact]}>
           <View style={styles.iconWrap}>
             <Ionicons name={isNative ? "phone-portrait-outline" : "flash-outline"} size={35} color="#153F32" />
           </View>
@@ -156,14 +164,15 @@ export function AppUpdateManager({ blocked, networkAvailable }: AppUpdateManager
           ) : null}
           {isMandatory ? <Text style={styles.required}>This update is required to continue safely.</Text> : null}
         </View>
-      </View>
+      </ScrollView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  modalScroll: { flex: 1 },
   backdrop: {
-    flex: 1,
+    flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(21, 63, 50, 0.55)",
@@ -178,6 +187,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 25,
     paddingVertical: 28,
   },
+  cardCompact: { borderRadius: 24, paddingHorizontal: 19, paddingVertical: 21 },
   iconWrap: {
     width: 76,
     height: 76,
@@ -188,7 +198,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   eyebrow: { color: "#D4A62A", fontSize: 12, fontWeight: "900", letterSpacing: 1.4 },
-  title: { color: "#153F32", fontFamily: "serif", fontSize: 29, fontStyle: "italic", fontWeight: "900", textAlign: "center", marginTop: 7 },
+  title: { color: "#153F32", fontFamily: DISPLAY_FONT_FAMILY, fontSize: 29, textAlign: "center", marginTop: 7 },
   version: { color: "#204C3B", fontSize: 13, fontWeight: "800", marginTop: 9 },
   notes: { color: "#526659", fontSize: 14, lineHeight: 21, textAlign: "center", marginTop: 14 },
   installNote: { color: "#526659", fontSize: 11, lineHeight: 16, textAlign: "center", marginTop: 9 },
