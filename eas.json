@@ -14,6 +14,14 @@
         "buildType": "apk"
       }
     },
+      "beta": {
+      "distribution": "internal",
+      "environment": "beta",
+      "channel": "beta",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "environment": "production",
       "channel": "production"
