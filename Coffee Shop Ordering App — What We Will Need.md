@@ -67,7 +67,7 @@ We will also need:
 
 ---
 
-## 4. User Types
+## 4. User Persona
 
 ### Customer
 Can:
