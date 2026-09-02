@@ -27,6 +27,8 @@
 - Supabase Storage
 - Row Level Security
 - Database migrations
+- CDN Image
+
 
 ### Supabase environments
 We should eventually separate:
@@ -65,19 +67,20 @@ We will also need:
 
 ---
 
-## 4. User Types
+## 4. User Persona
 
 ### Customer
 Can:
 
 - Register/login
-- Browse menu
-- Customize drinks
-- Add items to cart
-- Pay
-- Track order
-- View order history
-- Receive notifications
+- Browse menu ✅
+- Customize drinks ✅
+- Add items to cart ✅
+- Pay ⏳
+- Track order ✅
+- View order history ✅
+- Receive notifications ⏳
+- GPS Enabled ❓
 
 ### Barista / Cashier
 Can:
