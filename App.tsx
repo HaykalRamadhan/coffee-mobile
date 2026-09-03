@@ -55,8 +55,10 @@ import {
   type MaintenanceConfig,
 } from "./lib/maintenance";
 import {
+  isActiveOrder,
   loadAccountOrders,
   orderStatusLabel,
+  subscribeToOrderChanges,
   type AccountOrder,
 } from "./lib/orders";
 import { getOrderItemDisplayDetails } from "./lib/orderDetails";
@@ -272,7 +274,7 @@ function KopiPowApp() {
   }));
   const cartItemCount = cart.items.reduce((total, item) => total + item.quantity, 0);
   const cartSubtotal = cart.items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
-  const latestPendingOrder = orders.find((order) => order.status === "pending") ?? null;
+  const latestActiveOrder = orders.find(isActiveOrder) ?? null;
   const openCustomizer = (drink: Drink) => {
     setCustomization({ ...defaultCustomization, extras: [] });
     setSelectedDrink(drink);
@@ -682,6 +684,50 @@ function KopiPowApp() {
   }, [session?.user.id, ordersRefreshVersion]);
 
   useEffect(() => {
+    const userId = session?.user.id;
+    if (!userId || !networkAvailable) return;
+
+    let fullRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleFullRefresh = (delay = 150) => {
+      if (fullRefreshTimer) clearTimeout(fullRefreshTimer);
+      fullRefreshTimer = setTimeout(() => {
+        fullRefreshTimer = null;
+        void refreshOrders();
+      }, delay);
+    };
+
+    const unsubscribe = subscribeToOrderChanges({
+      channelKey: `customer-${userId}`,
+      userId,
+      onChange: (change) => {
+        if (change.orderId && change.eventType === "DELETE") {
+          setOrders((current) => current.filter((order) => order.id !== change.orderId));
+        } else if (change.orderId && change.eventType === "UPDATE") {
+          setOrders((current) => current.map((order) => order.id === change.orderId
+            ? {
+              ...order,
+              status: change.status ?? order.status,
+              paymentStatus: change.paymentStatus ?? order.paymentStatus,
+            }
+            : order));
+        }
+
+        // Re-fetch shortly afterward so non-status fields and new order items
+        // stay synchronized too. The direct state update above keeps status UI instant.
+        scheduleFullRefresh();
+      },
+      // Refresh after every successful connection/reconnection so updates made
+      // while the app was backgrounded or offline cannot be missed.
+      onSubscribed: () => scheduleFullRefresh(0),
+    });
+
+    return () => {
+      if (fullRefreshTimer) clearTimeout(fullRefreshTimer);
+      unsubscribe();
+    };
+  }, [session?.user.id, networkAvailable]);
+
+  useEffect(() => {
     if (!networkAvailable) return;
     let isMounted = true;
     void loadHostedProductImageSources().then((sources) => {
@@ -1041,7 +1087,7 @@ function KopiPowApp() {
           </Pressable>
         </View>
 
-        {isAuthenticated && latestPendingOrder && (
+        {isAuthenticated && latestActiveOrder && (
           <Pressable style={styles.homeOrderBar} onPress={() => setIsOrderHistoryOpen(true)}>
             <View style={styles.homeOrderIcon}>
               <Ionicons name="receipt-outline" size={23} color={COLORS.green} />
@@ -1049,17 +1095,17 @@ function KopiPowApp() {
             <View style={styles.homeOrderCopy}>
               <Text style={styles.homeOrderEyebrow}>ACTIVE ORDER</Text>
               <Text style={styles.homeOrderTitle} numberOfLines={1}>
-                {`${orderStatusLabel[latestPendingOrder.status]} · #${latestPendingOrder.id.slice(0, 8).toUpperCase()}`}
+                {`${orderStatusLabel[latestActiveOrder.status]} · #${latestActiveOrder.id.slice(0, 8).toUpperCase()}`}
               </Text>
               <Text style={styles.homeOrderDetail} numberOfLines={1}>
-                {latestPendingOrder.items.reduce((total, item) => total + item.quantity, 0)} items · {formatRupiah(latestPendingOrder.total)} · {formatCompactOrderDate(latestPendingOrder.createdAt)}
+                {latestActiveOrder.items.reduce((total, item) => total + item.quantity, 0)} items · {formatRupiah(latestActiveOrder.total)} · {formatCompactOrderDate(latestActiveOrder.createdAt)}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={21} color={COLORS.green} />
           </Pressable>
         )}
 
-        <View style={[styles.greetingBlock, !latestPendingOrder && styles.greetingBlockNoPendingOrder]}>
+        <View style={[styles.greetingBlock, !latestActiveOrder && styles.greetingBlockNoActiveOrder]}>
           <Text style={styles.greeting}>Good morning, {currentUser.displayName}.</Text>
           <Text style={styles.headline} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78}>Ready to power{`\n`}your way?</Text>
           <View style={styles.headlineBolt}><Bolt /></View>
@@ -1470,7 +1516,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" hidden={false} translucent backgroundColor="transparent" />
+      <StatusBar style="dark" hidden={false} />
       <AuthProvider>
         <KopiPowApp />
       </AuthProvider>
@@ -1503,7 +1549,7 @@ const styles = StyleSheet.create({
   comingSoonBurst: { width: 142, height: 142, borderRadius: 48, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginBottom: 32 },
   comingSoonIcon: { color: COLORS.green, fontSize: 88, fontWeight: "900", lineHeight: 96, textAlign: "center" },
   comingSoonEyebrowOutline: { borderWidth: 1.5, borderColor: COLORS.green, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 8, marginBottom: 14, overflow: "hidden" },
-  chargingGlow: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(32, 76, 59, 0.14)" },
+  chargingGlow: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(32, 76, 59, 0.14)" },
   comingSoonEyebrow: { color: COLORS.green, fontSize: 10.5, fontWeight: "900", letterSpacing: 1.7, zIndex: 1 },
   comingSoonTitle: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 36, lineHeight: 39, letterSpacing: -1.3, textAlign: "center" },
   comingSoonCopy: { color: COLORS.muted, fontSize: 13, lineHeight: 20, textAlign: "center", maxWidth: 300, marginTop: 16 },
@@ -1569,7 +1615,7 @@ const styles = StyleSheet.create({
   homeOrderTitle: { color: COLORS.ink, fontSize: 10.5, fontWeight: "900", marginTop: 2 },
   homeOrderDetail: { color: COLORS.muted, fontSize: 7.5, marginTop: 3 },
   greetingBlock: { paddingTop: 34, paddingBottom: 24, position: "relative" },
-  greetingBlockNoPendingOrder: { paddingTop: 0, paddingBottom: 38 },
+  greetingBlockNoActiveOrder: { paddingTop: 0, paddingBottom: 38 },
   greeting: { color: COLORS.muted, fontSize: 13, marginBottom: 8 },
   headline: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 42, lineHeight: 47, letterSpacing: -1.7, paddingBottom: 7, marginBottom: -7 },
   headlineBolt: { position: "absolute", right: 8, bottom: 24, width: 48, height: 48, borderRadius: 16, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "8deg" }] },

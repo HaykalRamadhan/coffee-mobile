@@ -61,6 +61,46 @@ export type OrdersResult = {
   error: string | null;
 };
 
+export type OrderRealtimeChange = {
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  orderId: string | null;
+  status: OrderStatus | null;
+  paymentStatus: PaymentStatus | null;
+};
+
+type OrderRealtimeOptions = {
+  channelKey: string;
+  userId?: string;
+  onChange: (change: OrderRealtimeChange) => void;
+  onSubscribed?: () => void;
+};
+
+const validOrderStatuses = new Set<OrderStatus>([
+  "pending",
+  "confirmed",
+  "preparing",
+  "ready",
+  "completed",
+  "cancelled",
+]);
+
+const validPaymentStatuses = new Set<PaymentStatus>([
+  "unpaid",
+  "pending",
+  "paid",
+  "failed",
+  "expired",
+  "refunded",
+]);
+
+const toOrderStatus = (value: unknown) => typeof value === "string" && validOrderStatuses.has(value as OrderStatus)
+  ? value as OrderStatus
+  : null;
+
+const toPaymentStatus = (value: unknown) => typeof value === "string" && validPaymentStatuses.has(value as PaymentStatus)
+  ? value as PaymentStatus
+  : null;
+
 export const orderStatusLabel: Record<OrderStatus, string> = {
   pending: "Order received",
   confirmed: "Confirmed",
@@ -146,5 +186,41 @@ export const loadAccountOrders = async (): Promise<OrdersResult> => {
         note: item.note,
       })),
     })),
+  };
+};
+
+export const subscribeToOrderChanges = ({
+  channelKey,
+  userId,
+  onChange,
+  onSubscribed,
+}: OrderRealtimeOptions) => {
+  const client = supabase;
+  if (!client) return () => undefined;
+
+  const realtimeFilter = {
+    event: "*" as const,
+    schema: "public" as const,
+    table: "orders",
+    ...(userId ? { filter: `user_id=eq.${userId}` } : {}),
+  };
+
+  const channel = client
+    .channel(`kopipow-order-changes-${channelKey}`)
+    .on("postgres_changes", realtimeFilter, (payload) => {
+      const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as Record<string, unknown>;
+      onChange({
+        eventType: payload.eventType,
+        orderId: typeof row.id === "string" ? row.id : null,
+        status: toOrderStatus(row.status),
+        paymentStatus: toPaymentStatus(row.payment_status),
+      });
+    })
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") onSubscribed?.();
+    });
+
+  return () => {
+    void client.removeChannel(channel);
   };
 };

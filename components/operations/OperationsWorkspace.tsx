@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,13 +15,17 @@ import type { AppRole } from "../../lib/access";
 import {
   advanceOrder,
   loadOperationsData,
+  markCounterPaymentReceived,
   setProductAvailability,
   type OperationsOrder,
   type OperationsProduct,
+  type OperationsSummary,
 } from "../../lib/operations";
-import { orderStatusLabel, type OrderStatus } from "../../lib/orders";
+import { orderStatusLabel, subscribeToOrderChanges, type OrderStatus } from "../../lib/orders";
 import { useResponsiveLayout } from "../../lib/responsive";
 import { Text } from "../../lib/typography";
+import { ReportsPanel } from "./ReportsPanel";
+import { WalkInPosPanel } from "./WalkInPosPanel";
 
 const COLORS = {
   background: "#F3F4F3",
@@ -57,6 +62,17 @@ const nextOrderAction: Partial<Record<OrderStatus, { label: string; status: Orde
   confirmed: { label: "Start preparing", status: "preparing" },
   preparing: { label: "Mark ready", status: "ready" },
   ready: { label: "Complete pickup", status: "completed" },
+};
+
+const emptySummary: OperationsSummary = {
+  todayRevenue: 0,
+  todayPaidOrders: 0,
+  totalRevenue: 0,
+  totalPaidOrders: 0,
+  totalOrders: 0,
+  activeOrders: 0,
+  outstandingCounterAmount: 0,
+  outstandingCounterOrders: 0,
 };
 
 function MetricCard({ label, value, icon }: { label: string; value: string; icon: keyof typeof Ionicons.glyphMap }) {
@@ -96,39 +112,104 @@ export function OperationsWorkspace({
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(role === "admin" ? "overview" : "orders");
   const [orders, setOrders] = useState<OperationsOrder[]>([]);
   const [products, setProducts] = useState<OperationsProduct[]>([]);
+  const [summary, setSummary] = useState<OperationsSummary>(emptySummary);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | number | null>(null);
 
-  const refresh = useCallback(async (pull = false) => {
-    if (pull) setRefreshing(true);
-    else setLoading(true);
+  const refresh = useCallback(async (mode: "initial" | "pull" | "silent" = "initial") => {
+    if (mode === "pull") setRefreshing(true);
+    if (mode === "initial") setLoading(true);
     const result = await loadOperationsData();
     setOrders(result.orders);
     setProducts(result.products);
+    setSummary(result.summary);
     setError(result.error);
-    setLoading(false);
-    setRefreshing(false);
+    if (mode === "initial") setLoading(false);
+    if (mode === "pull") setRefreshing(false);
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refresh("initial"); }, [refresh]);
+
+  useEffect(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void refresh("silent");
+      }, 150);
+    };
+
+    const unsubscribe = subscribeToOrderChanges({
+      channelKey: `operations-${role}-${branchId ?? "all"}`,
+      onChange: (change) => {
+        if (change.orderId && change.eventType === "UPDATE") {
+          setOrders((current) => current.map((order) => order.id === change.orderId
+            ? {
+              ...order,
+              status: change.status ?? order.status,
+              paymentStatus: change.paymentStatus ?? order.paymentStatus,
+            }
+            : order));
+        }
+        scheduleRefresh();
+      },
+      onSubscribed: scheduleRefresh,
+    });
+
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      unsubscribe();
+    };
+  }, [branchId, refresh, role]);
 
   const activeOrders = useMemo(
     () => orders.filter((order) => !["completed", "cancelled"].includes(order.status)),
     [orders],
   );
-  const todayRevenue = useMemo(() => orders
-    .filter((order) => new Date(order.createdAt).toDateString() === new Date().toDateString() && order.paymentStatus === "paid")
-    .reduce((total, order) => total + order.total, 0), [orders]);
+  const ordersNeedingSettlement = useMemo(
+    () => orders.filter((order) => order.paymentMethod === "pay_at_counter"
+      && order.paymentStatus !== "paid"
+      && order.status !== "cancelled"),
+    [orders],
+  );
+  const orderBoard = useMemo(() => orders.filter((order) => (
+    !["completed", "cancelled"].includes(order.status)
+    || (order.paymentMethod === "pay_at_counter" && order.paymentStatus !== "paid" && order.status !== "cancelled")
+  )), [orders]);
 
   const changeOrderStatus = async (order: OperationsOrder, status: OrderStatus) => {
     setBusyId(order.id);
     setError(null);
     const result = await advanceOrder(order.id, status);
     if (result.error) setError(result.error);
-    else await refresh();
+    else await refresh("silent");
     setBusyId(null);
+  };
+
+  const recordCounterPayment = (order: OperationsOrder) => {
+    Alert.alert(
+      "Confirm payment received",
+      `${formatRupiah(order.total)} for order #${order.id.slice(0, 8).toUpperCase()} will be added to revenue.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Record payment",
+          onPress: () => {
+            void (async () => {
+              setBusyId(order.id);
+              setError(null);
+              const result = await markCounterPaymentReceived(order.id);
+              if (result.error) setError(result.error);
+              else await refresh("silent");
+              setBusyId(null);
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const toggleProduct = async (product: OperationsProduct) => {
@@ -143,17 +224,27 @@ export function OperationsWorkspace({
   const renderOverview = () => (
     <>
       <View style={styles.metricGrid}>
-        <MetricCard label="Today's revenue" value={formatRupiah(todayRevenue)} icon="wallet-outline" />
-        <MetricCard label="Total orders" value={String(orders.length)} icon="receipt-outline" />
-        <MetricCard label="Active orders" value={String(activeOrders.length)} icon="flash-outline" />
-        <MetricCard label="Available products" value={`${products.filter((product) => product.active).length}/${products.length}`} icon="cafe-outline" />
+        <MetricCard label={`Today's revenue · ${summary.todayPaidOrders} paid`} value={formatRupiah(summary.todayRevenue)} icon="wallet-outline" />
+        <MetricCard label="Total recorded revenue" value={formatRupiah(summary.totalRevenue)} icon="trending-up-outline" />
+        <MetricCard label="Total orders" value={String(summary.totalOrders)} icon="receipt-outline" />
+        <MetricCard label="Active orders" value={String(summary.activeOrders)} icon="flash-outline" />
       </View>
+      {summary.outstandingCounterOrders > 0 && (
+        <View style={styles.paymentWarning}>
+          <Ionicons name="cash-outline" size={21} color={COLORS.danger} />
+          <View style={styles.paymentWarningCopy}>
+            <Text style={styles.paymentWarningTitle}>{summary.outstandingCounterOrders} counter payment{summary.outstandingCounterOrders === 1 ? "" : "s"} need recording</Text>
+            <Text style={styles.paymentWarningText}>{formatRupiah(summary.outstandingCounterAmount)} is not included in revenue yet.</Text>
+          </View>
+          <Pressable onPress={() => setActiveTab("orders")}><Text style={styles.linkText}>Review</Text></Pressable>
+        </View>
+      )}
       <View style={styles.sectionCard}>
         <View style={styles.sectionHeadingRow}>
           <View><Text style={styles.sectionTitle}>Recent global activity</Text><Text style={styles.sectionSubtitle}>Latest orders across accessible branches</Text></View>
           <Pressable onPress={() => setActiveTab("orders")}><Text style={styles.linkText}>View orders</Text></Pressable>
         </View>
-        {orders.slice(0, 5).map((order) => <OrderRow key={order.id} order={order} busy={busyId === order.id} onChange={changeOrderStatus} />)}
+        {orders.slice(0, 5).map((order) => <OrderRow key={order.id} order={order} busy={busyId === order.id} onChange={changeOrderStatus} onPayment={recordCounterPayment} />)}
       </View>
     </>
   );
@@ -161,12 +252,12 @@ export function OperationsWorkspace({
   const renderOrders = () => (
     <View style={styles.sectionCard}>
       <View style={styles.sectionHeadingRow}>
-        <View><Text style={styles.sectionTitle}>Online order board</Text><Text style={styles.sectionSubtitle}>Accept, prepare, ready, and complete each pickup</Text></View>
-        <View style={styles.countPill}><Text style={styles.countPillText}>{activeOrders.length} active</Text></View>
+        <View><Text style={styles.sectionTitle}>Order & payment board</Text><Text style={styles.sectionSubtitle}>Record counter payments before completing each pickup</Text></View>
+        <View style={styles.countPill}><Text style={styles.countPillText}>{activeOrders.length} active · {ordersNeedingSettlement.length} due</Text></View>
       </View>
-      {activeOrders.length === 0
+      {orderBoard.length === 0
         ? <EmptySection icon="checkmark-circle-outline" title="The queue is clear" copy="New online orders will appear here automatically." />
-        : activeOrders.map((order) => <OrderRow key={order.id} order={order} busy={busyId === order.id} onChange={changeOrderStatus} />)}
+        : orderBoard.map((order) => <OrderRow key={order.id} order={order} busy={busyId === order.id} onChange={changeOrderStatus} onPayment={recordCounterPayment} />)}
     </View>
   );
 
@@ -189,10 +280,11 @@ export function OperationsWorkspace({
 
   const renderContent = () => {
     if (loading) return <View style={styles.loadingCard}><ActivityIndicator color={COLORS.ink} /><Text style={styles.loadingText}>Loading workspace…</Text></View>;
-    if (activeTab === "overview" || activeTab === "reports") return renderOverview();
+    if (activeTab === "overview") return renderOverview();
+    if (activeTab === "reports") return <ReportsPanel compact={compact} channelKey={`${role}-${branchId ?? "all"}`} />;
     if (activeTab === "orders") return renderOrders();
     if (activeTab === "stock") return renderStock();
-    if (activeTab === "pos") return <EmptySection icon="calculator-outline" title="Walk-in POS" copy="The secured staff workspace is ready. Cart creation and cashier settlement are the next operational slice." />;
+    if (activeTab === "pos") return <WalkInPosPanel products={products} compact={compact} onCreated={() => { void refresh("silent"); setActiveTab("orders"); }} />;
     if (activeTab === "branches") return <EmptySection icon="storefront-outline" title="Branch management" copy="The Main Branch is active. Branch editing and branch-specific stock will connect here." />;
     if (activeTab === "staff") return <EmptySection icon="people-outline" title="Staff accounts" copy="Assign Staff or Admin access from protected role records. Customer accounts cannot open this workspace." />;
     return <EmptySection icon="pricetag-outline" title="Promotions" copy="Promotion creation, scheduling, and reward thresholds will live here." />;
@@ -216,7 +308,7 @@ export function OperationsWorkspace({
           </ScrollView>
           {!compact && <Pressable style={styles.signOutButton} onPress={() => { void onSignOut(); }}><Ionicons name="log-out-outline" size={19} color={COLORS.danger} /><Text style={styles.signOutText}>Sign out</Text></Pressable>}
         </View>
-        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(true); }} tintColor={COLORS.ink} />}>
+        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh("pull"); }} tintColor={COLORS.ink} />}>
           <View style={styles.pageHeader}>
             <View><Text style={styles.eyebrow}>{role === "admin" ? "KOPIPOW OPERATIONS" : "BRANCH WORKSPACE"}</Text><Text style={styles.pageTitle}>{tabs.find((tab) => tab.id === activeTab)?.label}</Text><Text style={styles.welcome}>Welcome, {displayName}{branchId ? ` · ${branchId.slice(0, 8)}` : ""}</Text></View>
             {compact && <Pressable style={styles.mobileSignOut} onPress={() => { void onSignOut(); }}><Ionicons name="log-out-outline" size={21} color={COLORS.danger} /></Pressable>}
@@ -229,14 +321,19 @@ export function OperationsWorkspace({
   );
 }
 
-function OrderRow({ order, busy, onChange }: { order: OperationsOrder; busy: boolean; onChange: (order: OperationsOrder, status: OrderStatus) => void }) {
+function OrderRow({ order, busy, onChange, onPayment }: { order: OperationsOrder; busy: boolean; onChange: (order: OperationsOrder, status: OrderStatus) => void; onPayment: (order: OperationsOrder) => void }) {
   const action = nextOrderAction[order.status];
+  const paymentDue = order.paymentMethod === "pay_at_counter" && order.paymentStatus !== "paid" && order.status !== "cancelled";
+  const completionBlocked = action?.status === "completed" && order.paymentStatus !== "paid";
   return (
     <View style={styles.orderRow}>
-      <View style={styles.orderMain}><Text style={styles.orderId}>#{order.id.slice(0, 8).toUpperCase()}</Text><Text style={styles.orderCustomer}>{order.customerName}</Text><Text style={styles.orderMeta}>{order.itemCount} items · {formatRupiah(order.total)} · {order.paymentMethod === "midtrans_snap" ? order.paymentStatus : "counter"}</Text></View>
+      <View style={styles.orderMain}><Text style={styles.orderId}>#{order.id.slice(0, 8).toUpperCase()}</Text><Text style={styles.orderCustomer}>{order.customerName}</Text><Text style={styles.orderMeta}>{order.itemCount} items · {formatRupiah(order.total)} · {order.paymentMethod === "midtrans_snap" ? `Midtrans: ${order.paymentStatus}` : `Counter: ${order.paymentStatus === "paid" ? "paid" : "payment due"}`}</Text></View>
       <View style={styles.orderActions}>
-        <View style={styles.statusPill}><Text style={styles.statusText}>{orderStatusLabel[order.status]}</Text></View>
-        {busy ? <ActivityIndicator color={COLORS.ink} /> : action && <Pressable style={styles.primaryButton} onPress={() => onChange(order, action.status)}><Text style={styles.primaryButtonText}>{action.label}</Text></Pressable>}
+        <View key={`status-${order.status}`} style={[styles.statusPill, order.status === "ready" && styles.statusPillReady]}>
+          <Text style={styles.statusText} numberOfLines={1}>{orderStatusLabel[order.status]}</Text>
+        </View>
+        {busy ? <ActivityIndicator color={COLORS.ink} /> : paymentDue && <Pressable style={styles.paymentButton} onPress={() => onPayment(order)}><Ionicons name="cash-outline" size={15} color={COLORS.ink} /><Text style={styles.paymentButtonText}>Payment received</Text></Pressable>}
+        {!busy && action && !completionBlocked && <Pressable style={styles.primaryButton} onPress={() => onChange(order, action.status)}><Text style={styles.primaryButtonText}>{action.label}</Text></Pressable>}
         {!busy && ["pending", "confirmed", "preparing"].includes(order.status) && <Pressable style={styles.rejectButton} onPress={() => onChange(order, "cancelled")}><Text style={styles.rejectText}>Cancel</Text></Pressable>}
       </View>
     </View>
@@ -252,7 +349,8 @@ const styles = StyleSheet.create({
   content: { flex: 1 }, contentContainer: { padding: 24, maxWidth: 1180, width: "100%", alignSelf: "center" }, pageHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }, eyebrow: { color: COLORS.yellow, fontSize: 9, fontWeight: "900", letterSpacing: 1.5 }, pageTitle: { color: COLORS.ink, fontSize: 27, fontWeight: "900", marginTop: 4 }, welcome: { color: COLORS.muted, fontSize: 10, marginTop: 4 }, mobileSignOut: { width: 42, height: 42, borderRadius: 13, backgroundColor: COLORS.card, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.divider },
   metricGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginBottom: 14 }, metricCard: { flexGrow: 1, flexBasis: 190, minHeight: 135, backgroundColor: COLORS.card, borderRadius: 18, borderWidth: 1, borderColor: COLORS.divider, padding: 17 }, metricIcon: { width: 37, height: 37, borderRadius: 12, backgroundColor: "#F3E8B9", alignItems: "center", justifyContent: "center", marginBottom: 16 }, metricLabel: { color: COLORS.muted, fontSize: 10, fontWeight: "700" }, metricValue: { color: COLORS.ink, fontSize: 21, fontWeight: "900", marginTop: 5 },
   sectionCard: { backgroundColor: COLORS.card, borderRadius: 19, borderWidth: 1, borderColor: COLORS.divider, padding: 18 }, sectionHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }, sectionTitle: { color: COLORS.ink, fontSize: 15, fontWeight: "900" }, sectionSubtitle: { color: COLORS.muted, fontSize: 9.5, marginTop: 3 }, linkText: { color: COLORS.ink, fontSize: 10, fontWeight: "900" }, countPill: { backgroundColor: "#F3E8B9", borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7 }, countPillText: { color: COLORS.ink, fontSize: 9, fontWeight: "900" },
-  orderRow: { borderTopWidth: 1, borderTopColor: COLORS.divider, paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 12, flexWrap: "wrap" }, orderMain: { flex: 1, minWidth: 190 }, orderId: { color: COLORS.yellow, fontSize: 9, fontWeight: "900", letterSpacing: 0.8 }, orderCustomer: { color: COLORS.ink, fontSize: 12, fontWeight: "900", marginTop: 3 }, orderMeta: { color: COLORS.muted, fontSize: 9, marginTop: 3 }, orderActions: { flexDirection: "row", alignItems: "center", gap: 7, flexWrap: "wrap" }, statusPill: { borderRadius: 999, backgroundColor: "#E3EBE6", paddingHorizontal: 10, paddingVertical: 7 }, statusText: { color: COLORS.ink, fontSize: 8.5, fontWeight: "900" }, primaryButton: { borderRadius: 10, backgroundColor: COLORS.ink, paddingHorizontal: 12, paddingVertical: 9 }, primaryButtonText: { color: COLORS.card, fontSize: 8.5, fontWeight: "900" }, rejectButton: { paddingHorizontal: 8, paddingVertical: 8 }, rejectText: { color: COLORS.danger, fontSize: 8.5, fontWeight: "900" },
+  orderRow: { borderTopWidth: 1, borderTopColor: COLORS.divider, paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 12, flexWrap: "wrap" }, orderMain: { flex: 1, minWidth: 190 }, orderId: { color: COLORS.yellow, fontSize: 9, fontWeight: "900", letterSpacing: 0.8 }, orderCustomer: { color: COLORS.ink, fontSize: 12, fontWeight: "900", marginTop: 3 }, orderMeta: { color: COLORS.muted, fontSize: 9, marginTop: 3 }, orderActions: { maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 7, flexWrap: "wrap" }, statusPill: { flexShrink: 0, minHeight: 34, borderRadius: 999, backgroundColor: "#E3EBE6", paddingHorizontal: 12, paddingVertical: 7, alignItems: "center", justifyContent: "center" }, statusPillReady: { minWidth: 132 }, statusText: { flexShrink: 0, color: COLORS.ink, fontSize: 8.5, fontWeight: "900" }, primaryButton: { flexShrink: 0, borderRadius: 10, backgroundColor: COLORS.ink, paddingHorizontal: 12, paddingVertical: 9 }, primaryButtonText: { color: COLORS.card, fontSize: 8.5, fontWeight: "900" }, rejectButton: { flexShrink: 0, paddingHorizontal: 8, paddingVertical: 8 }, rejectText: { color: COLORS.danger, fontSize: 8.5, fontWeight: "900" },
   productRow: { minHeight: 66, borderTopWidth: 1, borderTopColor: COLORS.divider, flexDirection: "row", alignItems: "center", gap: 11 }, productIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#EFF2F0", alignItems: "center", justifyContent: "center" }, productCopy: { flex: 1 }, productName: { color: COLORS.ink, fontSize: 11, fontWeight: "900" }, productMeta: { color: COLORS.muted, fontSize: 8.5, marginTop: 2 },
   errorBanner: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: "#F5E1DD", borderRadius: 13, padding: 12, marginBottom: 14 }, errorText: { flex: 1, color: COLORS.danger, fontSize: 9.5, fontWeight: "700" }, loadingCard: { minHeight: 230, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.card, borderRadius: 18, gap: 10 }, loadingText: { color: COLORS.muted, fontSize: 10, fontWeight: "700" }, emptyCard: { minHeight: 250, alignItems: "center", justifyContent: "center", padding: 30, backgroundColor: COLORS.card, borderRadius: 18, borderWidth: 1, borderColor: COLORS.divider }, emptyIcon: { width: 58, height: 58, borderRadius: 18, backgroundColor: "#F3E8B9", alignItems: "center", justifyContent: "center", marginBottom: 15 }, emptyTitle: { color: COLORS.ink, fontSize: 17, fontWeight: "900", textAlign: "center" }, emptyCopy: { color: COLORS.muted, fontSize: 10.5, lineHeight: 16, textAlign: "center", maxWidth: 430, marginTop: 7 },
+  paymentWarning: { flexDirection: "row", alignItems: "center", gap: 11, backgroundColor: "#F8E9E5", borderWidth: 1, borderColor: "#E8C9C3", borderRadius: 15, padding: 14, marginBottom: 14 }, paymentWarningCopy: { flex: 1 }, paymentWarningTitle: { color: COLORS.danger, fontSize: 11, fontWeight: "900" }, paymentWarningText: { color: COLORS.muted, fontSize: 9, marginTop: 2 }, paymentButton: { flexShrink: 0, borderRadius: 10, backgroundColor: "#F3E8B9", borderWidth: 1, borderColor: COLORS.yellow, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6 }, paymentButtonText: { color: COLORS.ink, fontSize: 8.5, fontWeight: "900" },
 });

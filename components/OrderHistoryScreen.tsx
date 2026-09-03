@@ -7,9 +7,9 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { orderStatusLabel, type AccountOrder, type OrderStatus } from "../lib/orders";
+import { isActiveOrder, orderStatusLabel, type AccountOrder, type OrderStatus } from "../lib/orders";
 import { getOrderItemDisplayDetails } from "../lib/orderDetails";
 import { useResponsiveLayout } from "../lib/responsive";
 import { DISPLAY_FONT_FAMILY, Text } from "../lib/typography";
@@ -53,6 +53,21 @@ type OrderHistoryScreenProps = {
   onContinuePayment: (order: AccountOrder) => void;
 };
 
+type OrderHistoryCategory = "all" | "active" | "completed" | "cancelled";
+
+const orderCategories: Array<{ id: OrderHistoryCategory; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "active", label: "Active" },
+  { id: "completed", label: "Completed" },
+  { id: "cancelled", label: "Cancelled" },
+];
+
+const categoryEmptyCopy: Record<Exclude<OrderHistoryCategory, "all">, { title: string; copy: string }> = {
+  active: { title: "No active orders", copy: "Your next order will appear here while it is being prepared." },
+  completed: { title: "No completed orders", copy: "Finished pickups will be collected here." },
+  cancelled: { title: "No cancelled orders", copy: "Good news—there are no cancelled orders to show." },
+};
+
 export function OrderHistoryScreen({
   error,
   isLoading,
@@ -66,6 +81,21 @@ export function OrderHistoryScreen({
   const responsiveLayout = useResponsiveLayout();
   const [showFloatingBack, setShowFloatingBack] = useState(false);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(() => new Set());
+  const [selectedCategory, setSelectedCategory] = useState<OrderHistoryCategory>("all");
+
+  const categoryCounts = useMemo<Record<OrderHistoryCategory, number>>(() => ({
+    all: orders.length,
+    active: orders.filter(isActiveOrder).length,
+    completed: orders.filter((order) => order.status === "completed").length,
+    cancelled: orders.filter((order) => order.status === "cancelled").length,
+  }), [orders]);
+
+  const filteredOrders = useMemo(() => orders.filter((order) => {
+    if (selectedCategory === "active") return isActiveOrder(order);
+    if (selectedCategory === "completed") return order.status === "completed";
+    if (selectedCategory === "cancelled") return order.status === "cancelled";
+    return true;
+  }), [orders, selectedCategory]);
 
   const toggleOrderDetails = (orderId: string) => {
     setExpandedOrderIds((current) => {
@@ -118,6 +148,34 @@ export function OrderHistoryScreen({
 
       <Text style={styles.intro}>Track active pickup orders and revisit everything you have powered up with.</Text>
 
+      {orders.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoryScroll}
+          contentContainerStyle={styles.categoryList}
+        >
+          {orderCategories.map((category) => {
+            const isSelected = selectedCategory === category.id;
+            return (
+              <Pressable
+                key={category.id}
+                style={[styles.categoryChip, isSelected && styles.categoryChipSelected]}
+                onPress={() => setSelectedCategory(category.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={`${category.label} orders, ${categoryCounts[category.id]}`}
+              >
+                <Text style={[styles.categoryLabel, isSelected && styles.categoryLabelSelected]}>{category.label}</Text>
+                <View style={[styles.categoryCount, isSelected && styles.categoryCountSelected]}>
+                  <Text style={[styles.categoryCountText, isSelected && styles.categoryCountTextSelected]}>{categoryCounts[category.id]}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+
       {isLoading && orders.length === 0 ? (
         <View style={styles.loadingCard}>
           <ActivityIndicator size="large" color={COLORS.green} />
@@ -137,9 +195,17 @@ export function OrderHistoryScreen({
           <Text style={styles.emptyText}>Your completed and active orders will appear here after checkout.</Text>
           <Pressable style={styles.browseButton} onPress={onBrowseMenu}><Text style={styles.browseText}>Browse the menu</Text></Pressable>
         </View>
+      ) : filteredOrders.length === 0 && selectedCategory !== "all" ? (
+        <View style={styles.categoryEmptyCard}>
+          <View style={styles.categoryEmptyIcon}><Ionicons name="file-tray-outline" size={28} color={COLORS.green} /></View>
+          <View style={styles.categoryEmptyCopy}>
+            <Text style={styles.categoryEmptyTitle}>{categoryEmptyCopy[selectedCategory].title}</Text>
+            <Text style={styles.categoryEmptyText}>{categoryEmptyCopy[selectedCategory].copy}</Text>
+          </View>
+        </View>
       ) : (
         <View style={styles.orderList}>
-          {orders.map((order) => {
+          {filteredOrders.map((order) => {
             const statusColor = statusColors[order.status];
             const itemCount = order.items.reduce((total, item) => total + item.quantity, 0);
             const canContinuePayment = order.status !== "cancelled"
@@ -279,6 +345,16 @@ const styles = StyleSheet.create({
   title: { color: COLORS.ink, fontFamily: DISPLAY_FONT_FAMILY, fontSize: 38, lineHeight: 43, marginTop: 3 },
   titleNarrow: { fontSize: 31, lineHeight: 36 },
   intro: { color: COLORS.muted, fontSize: 16.5, lineHeight: 25, marginTop: 24, marginBottom: 24, maxWidth: 620 },
+  categoryScroll: { marginBottom: 20, marginHorizontal: -2 },
+  categoryList: { gap: 9, paddingHorizontal: 2 },
+  categoryChip: { minHeight: 44, borderRadius: 16, paddingLeft: 16, paddingRight: 9, flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: COLORS.white, borderWidth: 1, borderColor: "#DDE4DF" },
+  categoryChipSelected: { backgroundColor: COLORS.green, borderColor: COLORS.green },
+  categoryLabel: { color: COLORS.muted, fontSize: 12.5, fontWeight: "800" },
+  categoryLabelSelected: { color: COLORS.white },
+  categoryCount: { minWidth: 27, height: 27, borderRadius: 10, paddingHorizontal: 7, alignItems: "center", justifyContent: "center", backgroundColor: "#EEF1EF" },
+  categoryCountSelected: { backgroundColor: COLORS.yellow },
+  categoryCountText: { color: COLORS.muted, fontSize: 11, fontWeight: "900" },
+  categoryCountTextSelected: { color: COLORS.green },
   loadingCard: { minHeight: 270, borderRadius: 27, backgroundColor: COLORS.white, alignItems: "center", justifyContent: "center", gap: 16 },
   loadingText: { color: COLORS.muted, fontSize: 13, fontWeight: "700" },
   errorCard: { minHeight: 230, borderRadius: 25, backgroundColor: "#EBCBC4", alignItems: "center", justifyContent: "center", padding: 24 },
@@ -292,6 +368,11 @@ const styles = StyleSheet.create({
   emptyText: { color: COLORS.muted, fontSize: 12, lineHeight: 19, textAlign: "center", maxWidth: 320, marginTop: 9 },
   browseButton: { backgroundColor: COLORS.green, borderRadius: 18, paddingHorizontal: 21, paddingVertical: 14, marginTop: 20 },
   browseText: { color: COLORS.white, fontSize: 11.5, fontWeight: "900" },
+  categoryEmptyCard: { minHeight: 130, borderRadius: 22, padding: 20, backgroundColor: COLORS.white, borderWidth: 1, borderColor: "#DDE4DF", flexDirection: "row", alignItems: "center", gap: 14 },
+  categoryEmptyIcon: { width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: "#F3E8B9" },
+  categoryEmptyCopy: { flex: 1 },
+  categoryEmptyTitle: { color: COLORS.ink, fontSize: 16, fontWeight: "900" },
+  categoryEmptyText: { color: COLORS.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
   orderList: { gap: 16 },
   orderCard: { backgroundColor: COLORS.white, borderRadius: 27, padding: 22, borderWidth: 1, borderColor: "#DDE4DF" },
   orderCardNarrow: { borderRadius: 22, padding: 16 },

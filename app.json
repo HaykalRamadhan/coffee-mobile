@@ -15,15 +15,11 @@
     },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "backgroundColor": "#FFFFFF", 
+    "backgroundColor": "#FFFFFF",
     "androidStatusBar": {
       "barStyle": "dark-content",
       "backgroundColor": "#00000000",
       "translucent": true
-    },
-    "androidNavigationBar": {
-      "barStyle": "dark-content",
-      "backgroundColor": "#FFFFFF"
     },
     "android": {
       "package": "com.kopipow.app",
@@ -43,7 +39,10 @@
       }
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "expo-image",
+      "expo-splash-screen",
+      "expo-status-bar"
     ],
     "extra": {
       "eas": {
