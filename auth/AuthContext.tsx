@@ -23,6 +23,11 @@ import {
   setSupabaseSession,
   supabaseAuth as supabase,
 } from "../lib/supabase";
+import {
+  CUSTOMER_ACCESS,
+  loadAppAccess,
+  type AppAccess,
+} from "../lib/access";
 
 type AuthResult = {
   error: string | null;
@@ -110,10 +115,13 @@ const runAuthRequest = async (
 };
 
 type AuthContextValue = {
+  access: AppAccess;
   appUser: AppUser;
   isAuthenticated: boolean;
   isInitializing: boolean;
   isPasswordRecovery: boolean;
+  isAccessLoading: boolean;
+  accessError: string | null;
   isSupabaseConfigured: boolean;
   session: Session | null;
   signIn: (email: string, password: string) => Promise<AuthResult>;
@@ -165,6 +173,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isInitializing, setIsInitializing] = useState(isSupabaseConfigured);
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+  const [access, setAccess] = useState<AppAccess>(CUSTOMER_ACCESS);
+  const [isAccessLoading, setIsAccessLoading] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -232,11 +243,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const userId = session?.user.id;
+
+    if (!userId) {
+      setAccess(CUSTOMER_ACCESS);
+      setAccessError(null);
+      setIsAccessLoading(false);
+      return () => { active = false; };
+    }
+
+    setIsAccessLoading(true);
+    setAccessError(null);
+    void loadAppAccess(userId)
+      .then((result) => {
+        if (!active) return;
+        setAccess(result.access);
+        setAccessError(result.error);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setAccess(CUSTOMER_ACCESS);
+        setAccessError(getUnexpectedAuthError(error));
+      })
+      .finally(() => {
+        if (active) setIsAccessLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [session?.user.id]);
+
   const value = useMemo<AuthContextValue>(() => ({
+    access,
+    accessError,
     appUser: getAppUser(session),
     isAuthenticated: Boolean(session),
     isInitializing,
     isPasswordRecovery,
+    isAccessLoading,
     isSupabaseConfigured,
     session,
     signIn: (email, password) => runAuthRequest(async () => {
@@ -336,7 +381,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         message: error ? undefined : "Profile updated.",
       };
     }),
-  }), [isInitializing, isPasswordRecovery, session]);
+  }), [access, accessError, isAccessLoading, isInitializing, isPasswordRecovery, session]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

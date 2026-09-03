@@ -37,6 +37,7 @@ import {
 import { MidtransPaymentScreen } from "./components/MidtransPaymentScreen";
 import { OrderHistoryScreen } from "./components/OrderHistoryScreen";
 import { ProfileScreen } from "./components/ProfileScreen";
+import { OperationsWorkspace } from "./components/operations/OperationsWorkspace";
 import {
   clearGuestCart,
   clearPendingAccountCart,
@@ -196,7 +197,14 @@ function ProductPhoto({
 }
 
 function KopiPowApp() {
-  const { appUser, isAuthenticated, session } = useAuth();
+  const {
+    access,
+    appUser,
+    isAccessLoading,
+    isAuthenticated,
+    session,
+    signOut,
+  } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const responsiveLayout = getResponsiveLayout(screenWidth, screenHeight);
@@ -917,6 +925,31 @@ function KopiPowApp() {
     );
   }
 
+  if (isAuthenticated && isAccessLoading) {
+    return (
+      <TypographyScaleContext.Provider value={typographyScale}>
+        <SafeAreaView style={styles.accessLoadingScreen}>
+          <View style={styles.accessLoadingMark}><Bolt /></View>
+          <Text style={styles.accessLoadingTitle}>Opening your workspace…</Text>
+          <Text style={styles.accessLoadingCopy}>Checking your KopiPow account access.</Text>
+        </SafeAreaView>
+      </TypographyScaleContext.Provider>
+    );
+  }
+
+  if (isAuthenticated && (access.role === "staff" || access.role === "admin")) {
+    return (
+      <TypographyScaleContext.Provider value={typographyScale}>
+        <OperationsWorkspace
+          role={access.role}
+          displayName={appUser.displayName}
+          branchId={access.branchId}
+          onSignOut={signOut}
+        />
+      </TypographyScaleContext.Provider>
+    );
+  }
+
   return (
     <TypographyScaleContext.Provider value={typographyScale}>
         <SafeAreaView edges={["left", "right"]} style={styles.safeArea}>
@@ -1446,6 +1479,10 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  accessLoadingScreen: { flex: 1, backgroundColor: COLORS.cream, alignItems: "center", justifyContent: "center", padding: 28 },
+  accessLoadingMark: { width: 62, height: 62, borderRadius: 20, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", marginBottom: 18, overflow: "hidden" },
+  accessLoadingTitle: { color: COLORS.ink, fontSize: 18, fontWeight: "900", textAlign: "center" },
+  accessLoadingCopy: { color: COLORS.muted, fontSize: 10, lineHeight: 15, textAlign: "center", marginTop: 6 },
   splashSafeArea: { flex: 1, backgroundColor: COLORS.cream, alignItems: "center", justifyContent: "center" },
   splashLogo: { alignItems: "center", justifyContent: "center" },
   splashLogoMark: { width: 92, height: 92, borderRadius: 30, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center", transform: [{ rotate: "-5deg" }], marginBottom: 22 },
