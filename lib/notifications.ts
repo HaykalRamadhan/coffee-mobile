@@ -5,6 +5,7 @@ import { supabase } from "./supabase";
 
 type NotificationsModule = typeof import("expo-notifications");
 type NotificationResponse = import("expo-notifications").NotificationResponse;
+export type KopiPowDevicePushToken = import("expo-notifications").DevicePushToken;
 
 declare const require: (moduleName: "expo-notifications") => NotificationsModule;
 
@@ -51,6 +52,15 @@ const getProjectId = () => (
   ?? null
 );
 
+const getRegistrationErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "Could not register this device for notifications.";
+};
+
 const configureAndroidChannels = async () => {
   if (Platform.OS !== "android") return;
   const Notifications = getNotifications();
@@ -88,7 +98,9 @@ const getNotificationPermission = async () => {
   return Notifications.requestPermissionsAsync();
 };
 
-export async function registerPushNotifications(): Promise<PushRegistrationResult> {
+export async function registerPushNotifications(
+  devicePushToken?: KopiPowDevicePushToken,
+): Promise<PushRegistrationResult> {
   if (Platform.OS === "web") {
     return { status: "unsupported", message: "Push notifications are currently available in the mobile app." };
   }
@@ -116,20 +128,20 @@ export async function registerPushNotifications(): Promise<PushRegistrationResul
       return { status: "error", message: "The EAS project ID is missing from app.json." };
     }
 
-    const token = await Notifications.getExpoPushTokenAsync({ projectId });
-    activeExpoPushToken = token.data;
+    const token = await Notifications.getExpoPushTokenAsync({ projectId, devicePushToken });
     const { error } = await supabase.rpc("register_my_push_device", {
       p_expo_push_token: token.data,
       p_platform: Platform.OS,
       p_app_version: Constants.expoConfig?.version ?? null,
     });
     if (error) throw error;
+    activeExpoPushToken = token.data;
 
     return { status: "registered", message: null };
   } catch (error) {
     return {
       status: "error",
-      message: error instanceof Error ? error.message : "Could not register this device for notifications.",
+      message: getRegistrationErrorMessage(error),
     };
   }
 }
@@ -141,11 +153,13 @@ export async function unregisterCurrentPushDevice() {
   await supabase.rpc("unregister_my_push_device", { p_expo_push_token: token });
 }
 
-export function listenForPushTokenChanges(onChanged: () => void) {
+export function listenForPushTokenChanges(
+  onChanged: (devicePushToken: KopiPowDevicePushToken) => void,
+) {
   if (Platform.OS === "web" || isExpoGo()) return () => undefined;
   const Notifications = getNotifications();
   if (!Notifications) return () => undefined;
-  const subscription = Notifications.addPushTokenListener(() => onChanged());
+  const subscription = Notifications.addPushTokenListener(onChanged);
   return () => subscription.remove();
 }
 
