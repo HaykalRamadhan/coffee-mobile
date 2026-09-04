@@ -1,7 +1,12 @@
 import Constants from "expo-constants";
-import * as Notifications from "expo-notifications";
+import { isRunningInExpoGo } from "expo";
 import { Platform } from "react-native";
 import { supabase } from "./supabase";
+
+type NotificationsModule = typeof import("expo-notifications");
+type NotificationResponse = import("expo-notifications").NotificationResponse;
+
+declare const require: (moduleName: "expo-notifications") => NotificationsModule;
 
 export type PushRegistrationResult = {
   status: "registered" | "denied" | "unsupported" | "error";
@@ -16,17 +21,29 @@ export type KopiPowNotificationData = {
 };
 
 let activeExpoPushToken: string | null = null;
+let notificationsModule: NotificationsModule | null = null;
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+const isExpoGo = () => isRunningInExpoGo();
 
-const isExpoGo = () => Constants.appOwnership === "expo";
+const getNotifications = (): NotificationsModule | null => {
+  if (Platform.OS === "web" || isExpoGo()) return null;
+  if (notificationsModule) return notificationsModule;
+
+  // Loading expo-notifications in Expo Go on Android throws during module
+  // initialization, before a function-level guard can run. Keep the native
+  // module lazy so Expo Go remains usable while development builds retain push.
+  notificationsModule = require("expo-notifications");
+  notificationsModule.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+
+  return notificationsModule;
+};
 
 const getProjectId = () => (
   Constants.easConfig?.projectId
@@ -36,6 +53,8 @@ const getProjectId = () => (
 
 const configureAndroidChannels = async () => {
   if (Platform.OS !== "android") return;
+  const Notifications = getNotifications();
+  if (!Notifications) return;
 
   await Promise.all([
     Notifications.setNotificationChannelAsync("orders", {
@@ -64,6 +83,8 @@ const configureAndroidChannels = async () => {
 };
 
 const getNotificationPermission = async () => {
+  const Notifications = getNotifications();
+  if (!Notifications) return null;
   const current = await Notifications.getPermissionsAsync();
   if (current.granted) return current;
   if (!current.canAskAgain) return current;
@@ -81,11 +102,15 @@ export async function registerPushNotifications(): Promise<PushRegistrationResul
     };
   }
   if (!supabase) return { status: "error", message: "Supabase is not configured." };
+  const Notifications = getNotifications();
+  if (!Notifications) {
+    return { status: "unsupported", message: "Push notifications are unavailable in this runtime." };
+  }
 
   try {
     await configureAndroidChannels();
     const permission = await getNotificationPermission();
-    if (!permission.granted) {
+    if (!permission?.granted) {
       return { status: "denied", message: "Notification permission was not granted." };
     }
 
@@ -121,6 +146,8 @@ export async function unregisterCurrentPushDevice() {
 
 export function listenForPushTokenChanges(onChanged: () => void) {
   if (Platform.OS === "web" || isExpoGo()) return () => undefined;
+  const Notifications = getNotifications();
+  if (!Notifications) return () => undefined;
   const subscription = Notifications.addPushTokenListener(() => onChanged());
   return () => subscription.remove();
 }
@@ -128,9 +155,11 @@ export function listenForPushTokenChanges(onChanged: () => void) {
 export function listenForNotificationResponses(
   onOpen: (data: KopiPowNotificationData) => void,
 ) {
-  if (Platform.OS === "web") return () => undefined;
+  if (Platform.OS === "web" || isExpoGo()) return () => undefined;
+  const Notifications = getNotifications();
+  if (!Notifications) return () => undefined;
 
-  const openResponse = (response: Notifications.NotificationResponse | null) => {
+  const openResponse = (response: NotificationResponse | null) => {
     if (!response) return;
     onOpen(response.notification.request.content.data as KopiPowNotificationData);
     void Notifications.clearLastNotificationResponseAsync();
@@ -142,6 +171,8 @@ export function listenForNotificationResponses(
 }
 
 export async function previewLocalNotification() {
+  const Notifications = getNotifications();
+  if (!Notifications) return null;
   await configureAndroidChannels();
   return Notifications.scheduleNotificationAsync({
     content: {
