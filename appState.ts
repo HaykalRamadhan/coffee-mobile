@@ -16,13 +16,35 @@ export type CartState = {
 };
 
 export type ProductCustomization = {
-  size: "Small" | "Regular" | "Large";
-  temperature: "Hot" | "Iced";
-  sugar: "0%" | "25%" | "50%" | "75%" | "100%";
-  ice: "No ice" | "Less ice" | "Normal ice" | "Extra ice";
-  milk: "Fresh milk" | "Oat milk" | "Soy milk" | "Almond milk";
+  size: string;
+  temperature: string;
+  sugar: string;
+  ice: string;
+  milk: string;
   extras: string[];
   note: string;
+};
+
+export type CustomizationOption = {
+  name: string;
+  price: number;
+};
+
+export type CustomizationOptionGroup = {
+  enabled: boolean;
+  defaultValue: string;
+  options: CustomizationOption[];
+};
+
+export type ProductCustomizationConfig = {
+  enabled: boolean;
+  size: CustomizationOptionGroup;
+  temperature: CustomizationOptionGroup;
+  sugar: CustomizationOptionGroup;
+  ice: CustomizationOptionGroup;
+  milk: CustomizationOptionGroup;
+  extrasEnabled: boolean;
+  extras: CustomizationOption[];
 };
 
 export type CartItem = {

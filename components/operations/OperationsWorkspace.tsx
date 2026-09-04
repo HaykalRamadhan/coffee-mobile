@@ -26,6 +26,12 @@ import { useResponsiveLayout } from "../../lib/responsive";
 import { Text } from "../../lib/typography";
 import { ReportsPanel } from "./ReportsPanel";
 import { WalkInPosPanel } from "./WalkInPosPanel";
+import {
+  BranchesCrudPanel,
+  ProductsCrudPanel,
+  PromotionsCrudPanel,
+  StaffCrudPanel,
+} from "./ManagementPanels";
 
 const COLORS = {
   background: "#F3F4F3",
@@ -41,13 +47,14 @@ type WorkspaceTab = "overview" | "orders" | "pos" | "stock" | "branches" | "staf
 type TabDefinition = { id: WorkspaceTab; label: string; icon: keyof typeof Ionicons.glyphMap };
 
 const staffTabs: TabDefinition[] = [
-  { id: "pos", label: "Walk-in POS", icon: "calculator-outline" },
+  { id: "pos", label: "Walk-in Order", icon: "calculator-outline" },
   { id: "orders", label: "Online orders", icon: "receipt-outline" },
   { id: "stock", label: "Stock", icon: "cube-outline" },
 ];
 
 const adminTabs: TabDefinition[] = [
   { id: "overview", label: "Overview", icon: "grid-outline" },
+  { id: "pos", label: "Walk-in Order", icon: "calculator-outline" },
   { id: "orders", label: "Orders", icon: "receipt-outline" },
   { id: "branches", label: "Branches", icon: "storefront-outline" },
   { id: "stock", label: "Menu & stock", icon: "cafe-outline" },
@@ -99,11 +106,13 @@ export function OperationsWorkspace({
   role,
   displayName,
   branchId,
+  openOrdersSignal,
   onSignOut,
 }: {
   role: Exclude<AppRole, "customer">;
   displayName: string;
   branchId: string | null;
+  openOrdersSignal?: number;
   onSignOut: () => Promise<{ error: string | null }>;
 }) {
   const layout = useResponsiveLayout();
@@ -131,6 +140,12 @@ export function OperationsWorkspace({
   }, []);
 
   useEffect(() => { void refresh("initial"); }, [refresh]);
+
+  useEffect(() => {
+    if (!openOrdersSignal) return;
+    setActiveTab("orders");
+    void refresh("silent");
+  }, [openOrdersSignal, refresh]);
 
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -283,11 +298,13 @@ export function OperationsWorkspace({
     if (activeTab === "overview") return renderOverview();
     if (activeTab === "reports") return <ReportsPanel compact={compact} channelKey={`${role}-${branchId ?? "all"}`} />;
     if (activeTab === "orders") return renderOrders();
-    if (activeTab === "stock") return renderStock();
+    if (activeTab === "stock") return role === "admin"
+      ? <ProductsCrudPanel onChanged={() => { void refresh("silent"); }} />
+      : renderStock();
     if (activeTab === "pos") return <WalkInPosPanel products={products} compact={compact} onCreated={() => { void refresh("silent"); setActiveTab("orders"); }} />;
-    if (activeTab === "branches") return <EmptySection icon="storefront-outline" title="Branch management" copy="The Main Branch is active. Branch editing and branch-specific stock will connect here." />;
-    if (activeTab === "staff") return <EmptySection icon="people-outline" title="Staff accounts" copy="Assign Staff or Admin access from protected role records. Customer accounts cannot open this workspace." />;
-    return <EmptySection icon="pricetag-outline" title="Promotions" copy="Promotion creation, scheduling, and reward thresholds will live here." />;
+    if (activeTab === "branches") return <BranchesCrudPanel />;
+    if (activeTab === "staff") return <StaffCrudPanel />;
+    return <PromotionsCrudPanel />;
   };
 
   return (

@@ -28,6 +28,21 @@ const periods: Array<{ id: OperationsReportPeriod; label: string }> = [
 
 const categoryColors = ["#153F32", "#E2B52F", "#9AB58A", "#D98E54", "#71877E"];
 const formatRupiah = (value: number) => `Rp ${Math.round(value).toLocaleString("id-ID")}`;
+const CHART_HEIGHT = 180;
+
+const formatAxisRupiah = (value: number) => {
+  if (value >= 1_000_000) return `Rp ${(value / 1_000_000).toLocaleString("id-ID", { maximumFractionDigits: 1 })}m`;
+  if (value >= 1_000) return `Rp ${Math.round(value / 1_000)}k`;
+  return `Rp ${Math.round(value)}`;
+};
+
+const niceRevenueMaximum = (value: number) => {
+  if (value <= 0) return 100_000;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const rounded = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return rounded * magnitude;
+};
 
 function ChangeLabel({ value }: { value: number | null }) {
   if (value === null) return <Text style={styles.neutralChange}>No previous-period data</Text>;
@@ -66,9 +81,14 @@ function ReportMetric({
 }
 
 function SalesTrend({ report, compact }: { report: OperationsReport; compact: boolean }) {
-  const maxRevenue = Math.max(...report.trend.map((point) => point.revenue), 1);
+  const [selectedPoint, setSelectedPoint] = useState<OperationsReport["trend"][number] | null>(null);
+  const maxRevenue = niceRevenueMaximum(Math.max(...report.trend.map((point) => point.revenue), 0));
   const hasSales = report.trend.some((point) => point.revenue > 0);
-  const labelStep = report.period === "today" ? 3 : report.period === "30d" ? 5 : 1;
+  const labelStep = report.period === "today" ? 2 : report.period === "30d" ? 4 : 1;
+  const yTicks = Array.from({ length: 5 }, (_, index) => maxRevenue * ((4 - index) / 4));
+  const chartMinimumWidth = Math.max(compact ? 620 : 520, report.trend.length * (report.period === "30d" ? 38 : 42));
+
+  useEffect(() => { setSelectedPoint(null); }, [report.period]);
 
   return (
     <View style={[styles.panel, styles.trendPanel]}>
@@ -79,21 +99,52 @@ function SalesTrend({ report, compact }: { report: OperationsReport; compact: bo
         </View>
         <View style={styles.livePill}><View style={styles.liveDot} /><Text style={styles.liveText}>Live</Text></View>
       </View>
-      <ScrollView horizontal={compact} showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chartScroll, compact && styles.chartScrollCompact]}>
-        <View style={styles.chartArea}>
-          {report.trend.map((point, index) => {
-            const height = point.revenue > 0 ? Math.max(10, (point.revenue / maxRevenue) * 150) : 4;
-            return (
-              <View key={`${point.label}-${index}`} style={styles.barColumn}>
-                <View style={styles.barTrack}>
-                  <View style={[styles.bar, { height }, point.revenue === 0 && styles.emptyBar]} />
-                </View>
-                <Text style={styles.barLabel}>{index % labelStep === 0 || index === report.trend.length - 1 ? point.label : ""}</Text>
-              </View>
-            );
-          })}
+      <Text style={styles.yAxisTitle}>Revenue (Rp)</Text>
+      <View style={styles.chartFrame}>
+        <View style={styles.yAxis}>
+          {yTicks.map((tick, index) => <Text key={`${tick}-${index}`} style={[styles.yTick, { top: (CHART_HEIGHT / 4) * index - 7 }]} numberOfLines={1}>{formatAxisRupiah(tick)}</Text>)}
         </View>
-      </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.chartScroll}>
+          <View style={[styles.chartCanvas, { minWidth: chartMinimumWidth }]}>
+            <View style={styles.plotArea}>
+              {yTicks.map((tick, index) => <View key={`line-${tick}-${index}`} pointerEvents="none" style={[styles.gridLine, { top: (CHART_HEIGHT / 4) * index }]} />)}
+              {selectedPoint && (
+                <View style={styles.chartTooltip}>
+                  <View style={styles.tooltipCopy}>
+                    <Text style={styles.tooltipTime}>{selectedPoint.label} WIB</Text>
+                    <Text style={styles.tooltipRevenue}>{formatRupiah(selectedPoint.revenue)}</Text>
+                    <Text style={styles.tooltipTransactions}>{selectedPoint.transactions} paid transaction{selectedPoint.transactions === 1 ? "" : "s"}</Text>
+                  </View>
+                  <Pressable accessibilityLabel="Close chart detail" onPress={() => setSelectedPoint(null)} style={styles.tooltipClose}><Ionicons name="close" size={15} color="#FFFFFF" /></Pressable>
+                </View>
+              )}
+              <View style={styles.barsRow}>
+                {report.trend.map((point, index) => {
+                  const height = point.revenue > 0 ? Math.max(8, (point.revenue / maxRevenue) * CHART_HEIGHT) : 4;
+                  const selected = selectedPoint?.label === point.label;
+                  return (
+                    <Pressable
+                      key={`${point.label}-${index}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${point.label}, ${formatRupiah(point.revenue)}, ${point.transactions} paid transactions`}
+                      accessibilityHint="Press and hold to show details"
+                      delayLongPress={350}
+                      onLongPress={() => setSelectedPoint(point)}
+                      style={styles.barColumn}
+                    >
+                      <View style={[styles.bar, { height }, point.revenue === 0 && styles.emptyBar, selected && styles.selectedBar]} />
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={styles.xLabels}>
+              {report.trend.map((point, index) => <View key={`label-${point.label}-${index}`} style={styles.xLabelColumn}><Text style={styles.barLabel} numberOfLines={1}>{index % labelStep === 0 || index === report.trend.length - 1 ? point.label : ""}</Text></View>)}
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+      <Text style={styles.xAxisTitle}>Time ({report.period === "today" ? "WIB" : "Jakarta dates"}) · hold a bar for details</Text>
       {!hasSales && <Text style={styles.noSalesCopy}>Paid sales will appear here as soon as payment is recorded.</Text>}
     </View>
   );
@@ -153,7 +204,7 @@ function TransactionsTable({ report, compact }: { report: OperationsReport; comp
     <View style={[styles.panel, styles.transactionsPanel]}>
       <View style={styles.panelHeading}>
         <View><Text style={styles.panelTitle}>Latest transactions</Text><Text style={styles.panelSubtitle}>Orders created during the selected period</Text></View>
-        <Text style={styles.timezoneText}>WIB</Text>
+        <Text style={styles.timezoneText}></Text>
       </View>
       {!compact && (
         <View style={styles.tableHeader}>
@@ -269,8 +320,12 @@ const styles = StyleSheet.create({
   panel: { backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.divider, borderRadius: 16, padding: 15 }, trendPanel: { flex: 2, minWidth: 0 }, categoryPanel: { flex: 1, minWidth: 240 }, transactionsPanel: { marginBottom: 10 },
   panelHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 13 }, panelTitle: { color: COLORS.ink, fontSize: 14, fontWeight: "900" }, panelSubtitle: { color: COLORS.muted, fontSize: 9, marginTop: 2 },
   livePill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, backgroundColor: COLORS.greenSoft }, liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.ink }, liveText: { color: COLORS.ink, fontSize: 8, fontWeight: "900" },
-  chartScroll: { flexGrow: 1 }, chartScrollCompact: { minWidth: 620 }, chartArea: { flex: 1, minHeight: 190, flexDirection: "row", alignItems: "flex-end", borderBottomWidth: 1, borderBottomColor: COLORS.divider, paddingTop: 10 },
-  barColumn: { flex: 1, minWidth: 22, height: 180, justifyContent: "flex-end", alignItems: "center", gap: 5 }, barTrack: { flex: 1, width: "72%", justifyContent: "flex-end" }, bar: { width: "100%", backgroundColor: COLORS.ink, borderTopLeftRadius: 4, borderTopRightRadius: 4 }, emptyBar: { backgroundColor: COLORS.divider }, barLabel: { minHeight: 14, color: COLORS.muted, fontSize: 7.5 }, noSalesCopy: { color: COLORS.muted, fontSize: 9.5, lineHeight: 14, textAlign: "center", paddingVertical: 10 },
+  yAxisTitle: { color: COLORS.muted, fontSize: 8, fontWeight: "800", marginBottom: 7 }, chartFrame: { flexDirection: "row", alignItems: "flex-start" }, yAxis: { width: 66, height: CHART_HEIGHT, position: "relative", borderRightWidth: 1, borderRightColor: COLORS.divider }, yTick: { position: "absolute", right: 7, width: 58, color: COLORS.muted, fontSize: 7, textAlign: "right" },
+  chartScroll: { flexGrow: 1 }, chartCanvas: { flexGrow: 1 }, plotArea: { height: CHART_HEIGHT, position: "relative", overflow: "hidden" }, gridLine: { position: "absolute", left: 0, right: 0, height: 1, backgroundColor: COLORS.divider }, barsRow: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, flexDirection: "row", alignItems: "flex-end" },
+  barColumn: { flex: 1, minWidth: 30, height: CHART_HEIGHT, justifyContent: "flex-end", alignItems: "center", paddingHorizontal: 5 }, bar: { width: "100%", maxWidth: 34, backgroundColor: COLORS.ink, borderTopLeftRadius: 4, borderTopRightRadius: 4 }, emptyBar: { backgroundColor: "#CAD2CD" }, selectedBar: { backgroundColor: COLORS.yellow },
+  xLabels: { minHeight: 28, flexDirection: "row", borderTopWidth: 1, borderTopColor: COLORS.ink }, xLabelColumn: { flex: 1, minWidth: 30, alignItems: "center", paddingHorizontal: 2, paddingTop: 6 }, barLabel: { color: COLORS.muted, fontSize: 7, textAlign: "center" }, xAxisTitle: { color: COLORS.muted, fontSize: 8, textAlign: "center", marginTop: 7 },
+  chartTooltip: { position: "absolute", zIndex: 5, elevation: 5, top: 8, left: "22%", right: "22%", minWidth: 150, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8, backgroundColor: COLORS.ink, borderRadius: 11, paddingHorizontal: 11, paddingVertical: 9 }, tooltipCopy: { flex: 1 }, tooltipTime: { color: "#DCE5E0", fontSize: 7.5, fontWeight: "800" }, tooltipRevenue: { color: "#FFFFFF", fontSize: 12, fontWeight: "900", marginTop: 2 }, tooltipTransactions: { color: "#DCE5E0", fontSize: 7.5, marginTop: 2 }, tooltipClose: { width: 24, height: 24, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.13)", alignItems: "center", justifyContent: "center" },
+  noSalesCopy: { color: COLORS.muted, fontSize: 9.5, lineHeight: 14, textAlign: "center", paddingVertical: 10 },
   categorySummary: { alignItems: "center", paddingVertical: 5 }, categoryRing: { width: 112, height: 112, borderRadius: 56, borderWidth: 15, borderColor: COLORS.yellow, backgroundColor: COLORS.yellowSoft, alignItems: "center", justifyContent: "center" }, categoryRingInner: { width: 70, height: 70, borderRadius: 35, backgroundColor: COLORS.card, alignItems: "center", justifyContent: "center" }, categoryTotal: { color: COLORS.ink, fontSize: 22, fontWeight: "900" }, categoryTotalLabel: { color: COLORS.muted, fontSize: 8 },
   categoryList: { marginTop: 10, gap: 9 }, categoryRow: { flexDirection: "row", alignItems: "center", gap: 7 }, categoryDot: { width: 9, height: 9, borderRadius: 5 }, categoryNameWrap: { flex: 1 }, categoryName: { color: COLORS.ink, fontSize: 9, fontWeight: "800" }, categoryItems: { color: COLORS.muted, fontSize: 7.5, marginTop: 1 }, categoryRevenue: { color: COLORS.ink, fontSize: 8.5, fontWeight: "900" },
   timezoneText: { color: COLORS.muted, fontSize: 8, fontWeight: "900" }, tableHeader: { minHeight: 32, flexDirection: "row", alignItems: "center", backgroundColor: "#F5F7F6", borderTopWidth: 1, borderBottomWidth: 1, borderColor: COLORS.divider, paddingHorizontal: 10 }, tableHeaderText: { color: COLORS.muted, fontSize: 8, fontWeight: "900" },

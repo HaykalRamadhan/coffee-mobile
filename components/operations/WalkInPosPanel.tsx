@@ -74,7 +74,7 @@ export function WalkInPosPanel({
           {selected.map((item) => <View key={item.id} style={styles.summaryRow}><Text style={styles.summaryItem}>{item.quantity}× {item.name}</Text><Text style={styles.summaryPrice}>{formatRupiah(item.basePrice * item.quantity)}</Text></View>)}
         </View>
         <View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>{formatRupiah(total)}</Text></View>
-        <View style={styles.paymentNote}><Ionicons name="cash-outline" size={18} color={COLORS.ink} /><Text style={styles.paymentNoteText}>Pay at counter · payment will be recorded from the order board.</Text></View>
+        <View style={styles.paymentNote}><Ionicons name="cash-outline" size={18} color={COLORS.ink} /><Text style={styles.paymentNoteText}>Payment will be recorded from the order board.</Text></View>
         {error && <Text style={styles.errorText}>{error}</Text>}
         <Pressable disabled={submitting || selected.length === 0} onPress={() => { void submit(); }} style={[styles.submitButton, (submitting || selected.length === 0) && styles.submitButtonDisabled]}>
           {submitting ? <ActivityIndicator color="#FFFFFF" /> : <><Ionicons name="receipt-outline" size={19} color="#FFFFFF" /><Text style={styles.submitText}>Create counter order</Text></>}

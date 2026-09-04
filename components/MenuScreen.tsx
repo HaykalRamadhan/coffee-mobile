@@ -13,6 +13,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PRODUCT_IMAGE_PATHS } from "../assets/products/productImages";
+import type { ProductCustomizationConfig } from "../appState";
+import { DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG, DISABLED_PRODUCT_CUSTOMIZATION_CONFIG } from "../lib/customization";
 import { useResponsiveLayout } from "../lib/responsive";
 import { DISPLAY_FONT_FAMILY, getResponsiveTextStyle } from "../lib/typography";
 
@@ -41,17 +43,18 @@ export type MenuDrink = {
   imageSource: ImageSource | null;
   tag: string;
   category: Exclude<MenuCategory, "For you">;
+  customizationConfig: ProductCustomizationConfig;
 };
 
 export const menuDrinks: MenuDrink[] = [
-  { id: 1, name: "Power Latte", detail: "Double espresso · oat milk", price: "Rp 42k", basePrice: 42000, accent: "#D9B38A", coffee: "#704129", imagePath: PRODUCT_IMAGE_PATHS.powerLatte, imageSource: null, tag: "BESTSELLER", category: "Coffee" },
-  { id: 2, name: "Orange Bolt", detail: "Espresso · orange tonic", price: "Rp 39k", basePrice: 39000, accent: "#EE9851", coffee: "#7A3825", imagePath: PRODUCT_IMAGE_PATHS.orangeBolt, imageSource: null, tag: "NEW", category: "Coffee" },
-  { id: 3, name: "Sesame Charge", detail: "Black sesame · fresh milk", price: "Rp 44k", basePrice: 44000, accent: "#A9A79C", coffee: "#413A35", imagePath: PRODUCT_IMAGE_PATHS.sesameCharge, imageSource: null, tag: "SIGNATURE", category: "Non-coffee" },
-  { id: 4, name: "Matcha Pow", detail: "Ceremonial matcha · oat milk", price: "Rp 45k", basePrice: 45000, accent: "#9BAC75", coffee: "#66804C", imagePath: PRODUCT_IMAGE_PATHS.matchaPow, imageSource: null, tag: "FRESH", category: "Non-coffee" },
-  { id: 5, name: "Cocoa Kick", detail: "Dark cocoa · fresh milk", price: "Rp 38k", basePrice: 38000, accent: "#B68A6D", coffee: "#56382C", imagePath: PRODUCT_IMAGE_PATHS.cocoaKick, imageSource: null, tag: "CLASSIC", category: "Non-coffee" },
-  { id: 6, name: "Long Black", detail: "Double espresso · water", price: "Rp 32k", basePrice: 32000, accent: "#948274", coffee: "#33231D", imagePath: PRODUCT_IMAGE_PATHS.longBlack, imageSource: null, tag: "STRONG", category: "Coffee" },
-  { id: 7, name: "Butter Croffle", detail: "Caramelized · sea salt", price: "Rp 35k", basePrice: 35000, accent: "#D3A45F", coffee: "#8B5D35", imagePath: PRODUCT_IMAGE_PATHS.butterCroffle, imageSource: null, tag: "CRISPY", category: "Snacks" },
-  { id: 8, name: "Power Banana", detail: "Banana loaf · brown butter", price: "Rp 34k", basePrice: 34000, accent: "#D9B75D", coffee: "#7A5330", imagePath: PRODUCT_IMAGE_PATHS.powerBanana, imageSource: null, tag: "BAKED", category: "Snacks" },
+  { id: 1, name: "Power Latte", detail: "Double espresso · oat milk", price: "Rp 42k", basePrice: 42000, accent: "#D9B38A", coffee: "#704129", imagePath: PRODUCT_IMAGE_PATHS.powerLatte, imageSource: null, tag: "BESTSELLER", category: "Coffee", customizationConfig: DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG },
+  { id: 2, name: "Orange Bolt", detail: "Espresso · orange tonic", price: "Rp 39k", basePrice: 39000, accent: "#EE9851", coffee: "#7A3825", imagePath: PRODUCT_IMAGE_PATHS.orangeBolt, imageSource: null, tag: "NEW", category: "Coffee", customizationConfig: DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG },
+  { id: 3, name: "Sesame Charge", detail: "Black sesame · fresh milk", price: "Rp 44k", basePrice: 44000, accent: "#A9A79C", coffee: "#413A35", imagePath: PRODUCT_IMAGE_PATHS.sesameCharge, imageSource: null, tag: "SIGNATURE", category: "Non-coffee", customizationConfig: DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG },
+  { id: 4, name: "Matcha Pow", detail: "Ceremonial matcha · oat milk", price: "Rp 45k", basePrice: 45000, accent: "#9BAC75", coffee: "#66804C", imagePath: PRODUCT_IMAGE_PATHS.matchaPow, imageSource: null, tag: "FRESH", category: "Non-coffee", customizationConfig: DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG },
+  { id: 5, name: "Cocoa Kick", detail: "Dark cocoa · fresh milk", price: "Rp 38k", basePrice: 38000, accent: "#B68A6D", coffee: "#56382C", imagePath: PRODUCT_IMAGE_PATHS.cocoaKick, imageSource: null, tag: "CLASSIC", category: "Non-coffee", customizationConfig: DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG },
+  { id: 6, name: "Long Black", detail: "Double espresso · water", price: "Rp 32k", basePrice: 32000, accent: "#948274", coffee: "#33231D", imagePath: PRODUCT_IMAGE_PATHS.longBlack, imageSource: null, tag: "STRONG", category: "Coffee", customizationConfig: DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG },
+  { id: 7, name: "Butter Croffle", detail: "Caramelized · sea salt", price: "Rp 35k", basePrice: 35000, accent: "#D3A45F", coffee: "#8B5D35", imagePath: PRODUCT_IMAGE_PATHS.butterCroffle, imageSource: null, tag: "CRISPY", category: "Snacks", customizationConfig: DISABLED_PRODUCT_CUSTOMIZATION_CONFIG },
+  { id: 8, name: "Power Banana", detail: "Banana loaf · brown butter", price: "Rp 34k", basePrice: 34000, accent: "#D9B75D", coffee: "#7A5330", imagePath: PRODUCT_IMAGE_PATHS.powerBanana, imageSource: null, tag: "BAKED", category: "Snacks", customizationConfig: DISABLED_PRODUCT_CUSTOMIZATION_CONFIG },
 ];
 
 type MenuScreenProps = {
@@ -126,7 +129,7 @@ export function MenuScreen({
   const categorySearch = menuCategories.find(
     (category) => category !== "For you" && category.toLocaleLowerCase() === normalizedSearchQuery,
   );
-  const searchMatches = menuDrinks.filter((drink) => {
+  const searchMatches = drinks.filter((drink) => {
     if (!normalizedSearchQuery) return true;
     if (categorySearch) return drink.category === categorySearch;
     return [drink.name, drink.detail, drink.tag, drink.category]
@@ -244,7 +247,7 @@ export function MenuScreen({
           {filteredDrinks.map((drink) => (
             <View key={drink.id} style={[styles.menuCard, useSingleColumn && styles.menuCardSingleColumn, useThreeColumns && styles.menuCardThreeColumns]}>
               <View style={[styles.menuDrinkVisual, { backgroundColor: drink.accent }]}>
-                <Text style={styles.menuDrinkTag}>{drink.tag}</Text>
+                {drink.tag ? <Text style={styles.menuDrinkTag}>{drink.tag}</Text> : null}
                 <ProductPhoto imageSource={drink.imageSource} name={drink.name} />
               </View>
               <Text style={styles.menuDrinkName} numberOfLines={2}>{drink.name}</Text>

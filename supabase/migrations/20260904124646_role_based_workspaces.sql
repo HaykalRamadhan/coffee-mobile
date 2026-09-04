@@ -1,0 +1,4 @@
+-- Production replay marker.
+-- The complete role workspace schema is defined in
+-- 20260903181101_role_based_workspaces.sql. Production replayed that verified,
+-- idempotent migration while its historical ledger was synchronized.

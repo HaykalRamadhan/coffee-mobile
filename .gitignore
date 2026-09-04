@@ -7,3 +7,7 @@ GOALS.md
 .env
 .env.*
 !.env.example
+
+# Private Firebase Admin / FCM credentials
+*-firebase-adminsdk-*.json
+firebase-service-account*.json

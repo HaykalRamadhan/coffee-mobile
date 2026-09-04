@@ -62,8 +62,13 @@ import {
   type AccountOrder,
 } from "./lib/orders";
 import { getOrderItemDisplayDetails } from "./lib/orderDetails";
+import {
+  listenForNotificationResponses,
+  listenForPushTokenChanges,
+  registerPushNotifications,
+} from "./lib/notifications";
 import { paymentGateway } from "./lib/payments";
-import { loadHostedProductImageSources, type ProductImageSources } from "./lib/productImages";
+import { loadHostedProductCatalog } from "./lib/productImages";
 import { getResponsiveLayout } from "./lib/responsive";
 import {
   DISPLAY_FONT_FAMILY,
@@ -82,6 +87,11 @@ import {
   type CartState,
   type ProductCustomization,
 } from "./appState";
+import {
+  DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG,
+  getConfiguredProductPrice,
+  getDefaultCustomization,
+} from "./lib/customization";
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -95,30 +105,10 @@ const COLORS = {
   white: "#FFFFFF",
 };
 
-const sizeOptions: ProductCustomization["size"][] = ["Small", "Regular", "Large"];
-const temperatureOptions: ProductCustomization["temperature"][] = ["Hot", "Iced"];
-const sugarOptions: ProductCustomization["sugar"][] = ["0%", "25%", "50%", "75%", "100%"];
-const iceOptions: ProductCustomization["ice"][] = ["No ice", "Less ice", "Normal ice", "Extra ice"];
-const milkOptions: ProductCustomization["milk"][] = ["Fresh milk", "Oat milk", "Soy milk", "Almond milk"];
-const extraOptions = [
-  { name: "Extra espresso shot", price: 7000 },
-  { name: "Syrup", price: 5000 },
-  { name: "Whipped cream", price: 6000 },
-  { name: "Caramel", price: 5000 },
-  { name: "Additional topping", price: 6000 },
-];
-
-const defaultCustomization: ProductCustomization = {
-  size: "Regular",
-  temperature: "Iced",
-  sugar: "50%",
-  ice: "Normal ice",
-  milk: "Fresh milk",
-  extras: [],
-  note: "",
-};
-
 const formatRupiah = (amount: number) => `Rp ${amount.toLocaleString("id-ID")}`;
+const formatOptionAdjustment = (price: number) => price === 0
+  ? ""
+  : ` · ${price > 0 ? "+" : "−"}${Math.abs(price) / 1000}k`;
 const formatCompactOrderDate = (createdAt: string) => new Date(createdAt).toLocaleDateString("id-ID", {
   day: "numeric",
   month: "short",
@@ -143,16 +133,7 @@ const getCartSyncErrorMessage = (error: string) => (
 );
 
 const getConfiguredPrice = (drink: Drink, options: ProductCustomization) => {
-  if (drink.category === "Snacks") return drink.basePrice;
-  const sizeAdjustment = options.size === "Large" ? 5000 : options.size === "Small" ? -3000 : 0;
-  const milkAdjustment = options.milk === "Oat milk" || options.milk === "Almond milk"
-    ? 7000
-    : options.milk === "Soy milk" ? 5000 : 0;
-  const extrasAdjustment = options.extras.reduce(
-    (total, extraName) => total + (extraOptions.find((extra) => extra.name === extraName)?.price ?? 0),
-    0,
-  );
-  return drink.basePrice + sizeAdjustment + milkAdjustment + extrasAdjustment;
+  return getConfiguredProductPrice(drink.basePrice, drink.customizationConfig, options);
 };
 
 type Drink = MenuDrink;
@@ -235,12 +216,13 @@ function KopiPowApp() {
   const [isOrdersLoading, setIsOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [ordersRefreshVersion, setOrdersRefreshVersion] = useState(0);
+  const [operationsOrdersSignal, setOperationsOrdersSignal] = useState(0);
   const [networkAvailable, setNetworkAvailable] = useState(true);
   const [selectedDrink, setSelectedDrink] = useState<Drink | null>(null);
-  const [customization, setCustomization] = useState<ProductCustomization>(defaultCustomization);
+  const [customization, setCustomization] = useState<ProductCustomization>(() => getDefaultCustomization(DEFAULT_PRODUCT_CUSTOMIZATION_CONFIG));
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
-  const [productImageSources, setProductImageSources] = useState<ProductImageSources>({});
+  const [catalogDrinks, setCatalogDrinks] = useState<MenuDrink[]>(menuDrinks);
   const splashOpacity = useRef(new Animated.Value(0)).current;
   const splashScale = useRef(new Animated.Value(0.72)).current;
   const chargingProgress = useRef(new Animated.Value(0)).current;
@@ -268,15 +250,12 @@ function KopiPowApp() {
   accountUserIdRef.current = session?.user.id ?? null;
   networkAvailableRef.current = networkAvailable;
   const currentUser = appUser;
-  const drinks = menuDrinks.map((drink) => ({
-    ...drink,
-    imageSource: productImageSources[drink.id] ?? null,
-  }));
+  const drinks = catalogDrinks;
   const cartItemCount = cart.items.reduce((total, item) => total + item.quantity, 0);
   const cartSubtotal = cart.items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
   const latestActiveOrder = orders.find(isActiveOrder) ?? null;
   const openCustomizer = (drink: Drink) => {
-    setCustomization({ ...defaultCustomization, extras: [] });
+    setCustomization(getDefaultCustomization(drink.customizationConfig));
     setSelectedDrink(drink);
   };
 
@@ -294,8 +273,9 @@ function KopiPowApp() {
   const addConfiguredItemToCart = () => {
     if (!selectedDrink) return;
 
-    const isSnack = selectedDrink.category === "Snacks";
-    const itemCustomization = isSnack ? null : { ...customization, extras: [...customization.extras] };
+    const itemCustomization = selectedDrink.customizationConfig.enabled
+      ? { ...customization, extras: [...customization.extras] }
+      : null;
     const item: CartItem = {
       lineId: `${selectedDrink.id}-${Date.now()}`,
       productId: selectedDrink.id,
@@ -683,6 +663,41 @@ function KopiPowApp() {
     void refreshOrders();
   }, [session?.user.id, ordersRefreshVersion]);
 
+  useEffect(() => listenForNotificationResponses((data) => {
+    if (data.screen === "operations-orders") {
+      setOperationsOrdersSignal((value) => value + 1);
+      return;
+    }
+    if (data.screen === "order-history") {
+      setSelectedDrink(null);
+      setPaymentOrder(null);
+      setIsCheckoutOpen(false);
+      setIsOrderHistoryOpen(true);
+      setOrdersRefreshVersion((value) => value + 1);
+      return;
+    }
+    if (data.screen === "home") setActiveTab("Home");
+  }), []);
+
+  useEffect(() => {
+    if (!session?.user.id || !networkAvailable) return;
+
+    let cancelled = false;
+    const register = async () => {
+      const result = await registerPushNotifications();
+      if (!cancelled && result.status === "error") {
+        console.warn(`[notifications] ${result.message ?? "Device registration failed."}`);
+      }
+    };
+
+    void register();
+    const stopListeningForTokenChanges = listenForPushTokenChanges(() => { void register(); });
+    return () => {
+      cancelled = true;
+      stopListeningForTokenChanges();
+    };
+  }, [networkAvailable, session?.user.id]);
+
   useEffect(() => {
     const userId = session?.user.id;
     if (!userId || !networkAvailable) return;
@@ -730,8 +745,8 @@ function KopiPowApp() {
   useEffect(() => {
     if (!networkAvailable) return;
     let isMounted = true;
-    void loadHostedProductImageSources().then((sources) => {
-      if (isMounted) setProductImageSources(sources);
+    void loadHostedProductCatalog(menuDrinks).then((products) => {
+      if (isMounted) setCatalogDrinks(products);
     });
     return () => {
       isMounted = false;
@@ -990,6 +1005,7 @@ function KopiPowApp() {
           role={access.role}
           displayName={appUser.displayName}
           branchId={access.branchId}
+          openOrdersSignal={operationsOrdersSignal}
           onSignOut={signOut}
         />
       </TypographyScaleContext.Provider>
@@ -1416,39 +1432,39 @@ function KopiPowApp() {
                 </View>
 
                 <ScrollView style={styles.customizerScroll} contentContainerStyle={styles.customizerScrollContent} showsVerticalScrollIndicator={false}>
-                  {selectedDrink.category !== "Snacks" && <>
-                    <View style={styles.optionGroup}>
+                  {selectedDrink.customizationConfig.enabled && <>
+                    {selectedDrink.customizationConfig.size.enabled !== false && <View style={styles.optionGroup}>
                       <Text style={styles.optionTitle}>Size</Text>
-                      <View style={styles.optionWrap}>{sizeOptions.map((option) => <Pressable key={option} style={[styles.optionChip, customization.size === option && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, size: option }))}><Text style={[styles.optionChipText, customization.size === option && styles.optionChipTextActive]}>{option}{option === "Small" ? " · −3k" : option === "Large" ? " · +5k" : ""}</Text></Pressable>)}</View>
-                    </View>
-
-                    <View style={styles.optionGroup}>
-                      <Text style={styles.optionTitle}>Temperature</Text>
-                      <View style={styles.optionWrap}>{temperatureOptions.map((option) => <Pressable key={option} style={[styles.optionChip, customization.temperature === option && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, temperature: option }))}><Text style={[styles.optionChipText, customization.temperature === option && styles.optionChipTextActive]}>{option}</Text></Pressable>)}</View>
-                    </View>
-
-                    <View style={styles.optionGroup}>
-                      <Text style={styles.optionTitle}>Sugar</Text>
-                      <View style={styles.optionWrap}>{sugarOptions.map((option) => <Pressable key={option} style={[styles.optionChip, customization.sugar === option && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, sugar: option }))}><Text style={[styles.optionChipText, customization.sugar === option && styles.optionChipTextActive]}>{option}</Text></Pressable>)}</View>
-                    </View>
-
-                    {customization.temperature === "Iced" && <View style={styles.optionGroup}>
-                      <Text style={styles.optionTitle}>Ice</Text>
-                      <View style={styles.optionWrap}>{iceOptions.map((option) => <Pressable key={option} style={[styles.optionChip, customization.ice === option && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, ice: option }))}><Text style={[styles.optionChipText, customization.ice === option && styles.optionChipTextActive]}>{option}</Text></Pressable>)}</View>
+                      <View style={styles.optionWrap}>{selectedDrink.customizationConfig.size.options.map((option) => <Pressable key={option.name} style={[styles.optionChip, customization.size === option.name && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, size: option.name }))}><Text style={[styles.optionChipText, customization.size === option.name && styles.optionChipTextActive]}>{option.name}{formatOptionAdjustment(option.price)}</Text></Pressable>)}</View>
                     </View>}
 
-                    <View style={styles.optionGroup}>
-                      <Text style={styles.optionTitle}>Milk</Text>
-                      <View style={styles.optionWrap}>{milkOptions.map((option) => <Pressable key={option} style={[styles.optionChip, customization.milk === option && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, milk: option }))}><Text style={[styles.optionChipText, customization.milk === option && styles.optionChipTextActive]}>{option}{option === "Soy milk" ? " · +5k" : option !== "Fresh milk" ? " · +7k" : ""}</Text></Pressable>)}</View>
-                    </View>
+                    {selectedDrink.customizationConfig.temperature.enabled !== false && <View style={styles.optionGroup}>
+                      <Text style={styles.optionTitle}>Temperature</Text>
+                      <View style={styles.optionWrap}>{selectedDrink.customizationConfig.temperature.options.map((option) => <Pressable key={option.name} style={[styles.optionChip, customization.temperature === option.name && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, temperature: option.name }))}><Text style={[styles.optionChipText, customization.temperature === option.name && styles.optionChipTextActive]}>{option.name}{formatOptionAdjustment(option.price)}</Text></Pressable>)}</View>
+                    </View>}
 
-                    <View style={styles.optionGroup}>
+                    {selectedDrink.customizationConfig.sugar.enabled !== false && <View style={styles.optionGroup}>
+                      <Text style={styles.optionTitle}>Sugar</Text>
+                      <View style={styles.optionWrap}>{selectedDrink.customizationConfig.sugar.options.map((option) => <Pressable key={option.name} style={[styles.optionChip, customization.sugar === option.name && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, sugar: option.name }))}><Text style={[styles.optionChipText, customization.sugar === option.name && styles.optionChipTextActive]}>{option.name}{formatOptionAdjustment(option.price)}</Text></Pressable>)}</View>
+                    </View>}
+
+                    {selectedDrink.customizationConfig.ice.enabled !== false && <View style={styles.optionGroup}>
+                      <Text style={styles.optionTitle}>Ice</Text>
+                      <View style={styles.optionWrap}>{selectedDrink.customizationConfig.ice.options.map((option) => <Pressable key={option.name} style={[styles.optionChip, customization.ice === option.name && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, ice: option.name }))}><Text style={[styles.optionChipText, customization.ice === option.name && styles.optionChipTextActive]}>{option.name}{formatOptionAdjustment(option.price)}</Text></Pressable>)}</View>
+                    </View>}
+
+                    {selectedDrink.customizationConfig.milk.enabled !== false && <View style={styles.optionGroup}>
+                      <Text style={styles.optionTitle}>Milk</Text>
+                      <View style={styles.optionWrap}>{selectedDrink.customizationConfig.milk.options.map((option) => <Pressable key={option.name} style={[styles.optionChip, customization.milk === option.name && styles.optionChipActive]} onPress={() => setCustomization((current) => ({ ...current, milk: option.name }))}><Text style={[styles.optionChipText, customization.milk === option.name && styles.optionChipTextActive]}>{option.name}{formatOptionAdjustment(option.price)}</Text></Pressable>)}</View>
+                    </View>}
+
+                    {selectedDrink.customizationConfig.extrasEnabled !== false && selectedDrink.customizationConfig.extras.length > 0 && <View style={styles.optionGroup}>
                       <Text style={styles.optionTitle}>Extras · choose multiple</Text>
-                      <View style={styles.optionWrap}>{extraOptions.map((extra) => {
+                      <View style={styles.optionWrap}>{selectedDrink.customizationConfig.extras.map((extra) => {
                         const selected = customization.extras.includes(extra.name);
-                        return <Pressable key={extra.name} style={[styles.optionChip, selected && styles.optionChipActive]} onPress={() => toggleExtra(extra.name)}><Text style={[styles.optionChipText, selected && styles.optionChipTextActive]}>{extra.name} · +{extra.price / 1000}k</Text></Pressable>;
+                        return <Pressable key={extra.name} style={[styles.optionChip, selected && styles.optionChipActive]} onPress={() => toggleExtra(extra.name)}><Text style={[styles.optionChipText, selected && styles.optionChipTextActive]}>{extra.name}{formatOptionAdjustment(extra.price)}</Text></Pressable>;
                       })}</View>
-                    </View>
+                    </View>}
                   </>}
 
                   <View style={styles.optionGroup}>

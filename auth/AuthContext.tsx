@@ -28,6 +28,7 @@ import {
   loadAppAccess,
   type AppAccess,
 } from "../lib/access";
+import { unregisterCurrentPushDevice } from "../lib/notifications";
 
 type AuthResult = {
   error: string | null;
@@ -368,6 +369,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }),
     signOut: () => runAuthRequest(async () => {
       if (!supabase) return notConfiguredResult();
+      await unregisterCurrentPushDevice().catch(() => undefined);
       const { error } = await supabase.auth.signOut();
       return { error: error?.message ?? null };
     }),
