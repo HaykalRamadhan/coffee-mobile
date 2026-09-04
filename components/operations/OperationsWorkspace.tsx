@@ -32,6 +32,7 @@ import {
   PromotionsCrudPanel,
   StaffCrudPanel,
 } from "./ManagementPanels";
+import { OperationsSettingsPanel } from "./OperationsSettingsPanel";
 
 const COLORS = {
   background: "#F3F4F3",
@@ -43,7 +44,7 @@ const COLORS = {
   danger: "#A9453B",
 };
 
-type WorkspaceTab = "overview" | "orders" | "pos" | "stock" | "branches" | "staff" | "reports" | "promotions";
+type WorkspaceTab = "overview" | "orders" | "pos" | "stock" | "branches" | "staff" | "reports" | "promotions" | "settings";
 type TabDefinition = { id: WorkspaceTab; label: string; icon: keyof typeof Ionicons.glyphMap };
 
 const staffTabs: TabDefinition[] = [
@@ -105,15 +106,25 @@ function EmptySection({ icon, title, copy }: { icon: keyof typeof Ionicons.glyph
 export function OperationsWorkspace({
   role,
   displayName,
+  email,
+  phone,
   branchId,
+  networkAvailable,
   openOrdersSignal,
   onSignOut,
+  onUpdateDisplayName,
+  onUpdatePassword,
 }: {
   role: Exclude<AppRole, "customer">;
   displayName: string;
+  email: string | null;
+  phone: string | null;
   branchId: string | null;
+  networkAvailable: boolean;
   openOrdersSignal?: number;
   onSignOut: () => Promise<{ error: string | null }>;
+  onUpdateDisplayName: (displayName: string) => Promise<{ error: string | null; message?: string }>;
+  onUpdatePassword: (password: string) => Promise<{ error: string | null; message?: string }>;
 }) {
   const layout = useResponsiveLayout();
   const compact = layout.width < 760;
@@ -294,6 +305,20 @@ export function OperationsWorkspace({
   );
 
   const renderContent = () => {
+    if (activeTab === "settings") return (
+      <OperationsSettingsPanel
+        role={role}
+        displayName={displayName}
+        email={email}
+        phone={phone}
+        branchId={branchId}
+        compact={compact}
+        networkAvailable={networkAvailable}
+        onOpenBranches={() => setActiveTab("branches")}
+        onUpdateDisplayName={onUpdateDisplayName}
+        onUpdatePassword={onUpdatePassword}
+      />
+    );
     if (loading) return <View style={styles.loadingCard}><ActivityIndicator color={COLORS.ink} /><Text style={styles.loadingText}>Loading workspace…</Text></View>;
     if (activeTab === "overview") return renderOverview();
     if (activeTab === "reports") return <ReportsPanel compact={compact} channelKey={`${role}-${branchId ?? "all"}`} />;
@@ -323,12 +348,25 @@ export function OperationsWorkspace({
               </Pressable>
             ))}
           </ScrollView>
-          {!compact && <Pressable style={styles.signOutButton} onPress={() => { void onSignOut(); }}><Ionicons name="log-out-outline" size={19} color={COLORS.danger} /><Text style={styles.signOutText}>Sign out</Text></Pressable>}
+          {!compact && (
+            <View style={styles.sidebarFooter}>
+              <Pressable style={[styles.settingsButton, activeTab === "settings" && styles.navButtonActive]} onPress={() => setActiveTab("settings")}>
+                <Ionicons name="settings-outline" size={19} color={COLORS.ink} />
+                <Text style={[styles.navText, activeTab === "settings" && styles.navTextActive]}>Settings</Text>
+              </Pressable>
+              <Pressable style={styles.signOutButton} onPress={() => { void onSignOut(); }}><Ionicons name="log-out-outline" size={19} color={COLORS.danger} /><Text style={styles.signOutText}>Sign out</Text></Pressable>
+            </View>
+          )}
         </View>
         <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh("pull"); }} tintColor={COLORS.ink} />}>
           <View style={styles.pageHeader}>
-            <View><Text style={styles.eyebrow}>{role === "admin" ? "KOPIPOW OPERATIONS" : "BRANCH WORKSPACE"}</Text><Text style={styles.pageTitle}>{tabs.find((tab) => tab.id === activeTab)?.label}</Text><Text style={styles.welcome}>Welcome, {displayName}{branchId ? ` · ${branchId.slice(0, 8)}` : ""}</Text></View>
-            {compact && <Pressable style={styles.mobileSignOut} onPress={() => { void onSignOut(); }}><Ionicons name="log-out-outline" size={21} color={COLORS.danger} /></Pressable>}
+            <View><Text style={styles.eyebrow}>{role === "admin" ? "KOPIPOW OPERATIONS" : "BRANCH WORKSPACE"}</Text><Text style={styles.pageTitle}>{activeTab === "settings" ? "Settings" : tabs.find((tab) => tab.id === activeTab)?.label}</Text><Text style={styles.welcome}>Welcome, {displayName}{branchId ? ` · ${branchId.slice(0, 8)}` : ""}</Text></View>
+            {compact && (
+              <View style={styles.mobileHeaderActions}>
+                <Pressable style={[styles.mobileSignOut, activeTab === "settings" && styles.mobileSettingsActive]} onPress={() => setActiveTab("settings")}><Ionicons name="settings-outline" size={21} color={COLORS.ink} /></Pressable>
+                <Pressable style={styles.mobileSignOut} onPress={() => { void onSignOut(); }}><Ionicons name="log-out-outline" size={21} color={COLORS.danger} /></Pressable>
+              </View>
+            )}
           </View>
           {error && <View style={styles.errorBanner}><Ionicons name="alert-circle-outline" size={20} color={COLORS.danger} /><Text style={styles.errorText}>{error}</Text></View>}
           {renderContent()}
@@ -362,8 +400,8 @@ const styles = StyleSheet.create({
   sidebar: { width: 240, backgroundColor: COLORS.card, borderRightWidth: 1, borderRightColor: COLORS.divider, padding: 20 }, sidebarCompact: { width: "100%", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, borderRightWidth: 0, borderBottomWidth: 1, borderBottomColor: COLORS.divider },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 26 }, brandMark: { width: 39, height: 39, borderRadius: 12, backgroundColor: COLORS.yellow, alignItems: "center", justifyContent: "center" }, brandBolt: { color: COLORS.ink, fontSize: 29, lineHeight: 32, fontWeight: "900" }, brandName: { color: COLORS.ink, fontSize: 18, fontWeight: "900", fontStyle: "italic" }, brandMode: { color: COLORS.muted, fontSize: 8, fontWeight: "900", letterSpacing: 1.4, marginTop: 2 },
   compactTabs: { gap: 7, paddingRight: 20 }, navButton: { minHeight: 44, borderRadius: 12, paddingHorizontal: 12, marginBottom: 7, flexDirection: "row", alignItems: "center", gap: 10 }, navButtonCompact: { minHeight: 38, marginBottom: 0, borderWidth: 1, borderColor: COLORS.divider }, navButtonActive: { backgroundColor: "#F3E8B9", borderColor: COLORS.yellow }, navText: { color: COLORS.muted, fontSize: 11, fontWeight: "700" }, navTextActive: { color: COLORS.ink, fontWeight: "900" },
-  signOutButton: { marginTop: "auto", flexDirection: "row", alignItems: "center", gap: 9, minHeight: 44, paddingHorizontal: 12 }, signOutText: { color: COLORS.danger, fontSize: 11, fontWeight: "800" },
-  content: { flex: 1 }, contentContainer: { padding: 24, maxWidth: 1180, width: "100%", alignSelf: "center" }, pageHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }, eyebrow: { color: COLORS.yellow, fontSize: 9, fontWeight: "900", letterSpacing: 1.5 }, pageTitle: { color: COLORS.ink, fontSize: 27, fontWeight: "900", marginTop: 4 }, welcome: { color: COLORS.muted, fontSize: 10, marginTop: 4 }, mobileSignOut: { width: 42, height: 42, borderRadius: 13, backgroundColor: COLORS.card, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.divider },
+  sidebarFooter: { marginTop: "auto", gap: 4 }, settingsButton: { minHeight: 44, borderRadius: 12, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 10 }, signOutButton: { flexDirection: "row", alignItems: "center", gap: 9, minHeight: 44, paddingHorizontal: 12 }, signOutText: { color: COLORS.danger, fontSize: 11, fontWeight: "800" },
+  content: { flex: 1 }, contentContainer: { padding: 24, maxWidth: 1180, width: "100%", alignSelf: "center" }, pageHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }, eyebrow: { color: COLORS.yellow, fontSize: 9, fontWeight: "900", letterSpacing: 1.5 }, pageTitle: { color: COLORS.ink, fontSize: 27, fontWeight: "900", marginTop: 4 }, welcome: { color: COLORS.muted, fontSize: 10, marginTop: 4 }, mobileHeaderActions: { flexDirection: "row", gap: 8 }, mobileSignOut: { width: 42, height: 42, borderRadius: 13, backgroundColor: COLORS.card, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.divider }, mobileSettingsActive: { backgroundColor: "#F3E8B9", borderColor: COLORS.yellow },
   metricGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginBottom: 14 }, metricCard: { flexGrow: 1, flexBasis: 190, minHeight: 135, backgroundColor: COLORS.card, borderRadius: 18, borderWidth: 1, borderColor: COLORS.divider, padding: 17 }, metricIcon: { width: 37, height: 37, borderRadius: 12, backgroundColor: "#F3E8B9", alignItems: "center", justifyContent: "center", marginBottom: 16 }, metricLabel: { color: COLORS.muted, fontSize: 10, fontWeight: "700" }, metricValue: { color: COLORS.ink, fontSize: 21, fontWeight: "900", marginTop: 5 },
   sectionCard: { backgroundColor: COLORS.card, borderRadius: 19, borderWidth: 1, borderColor: COLORS.divider, padding: 18 }, sectionHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }, sectionTitle: { color: COLORS.ink, fontSize: 15, fontWeight: "900" }, sectionSubtitle: { color: COLORS.muted, fontSize: 9.5, marginTop: 3 }, linkText: { color: COLORS.ink, fontSize: 10, fontWeight: "900" }, countPill: { backgroundColor: "#F3E8B9", borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7 }, countPillText: { color: COLORS.ink, fontSize: 9, fontWeight: "900" },
   orderRow: { borderTopWidth: 1, borderTopColor: COLORS.divider, paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 12, flexWrap: "wrap" }, orderMain: { flex: 1, minWidth: 190 }, orderId: { color: COLORS.yellow, fontSize: 9, fontWeight: "900", letterSpacing: 0.8 }, orderCustomer: { color: COLORS.ink, fontSize: 12, fontWeight: "900", marginTop: 3 }, orderMeta: { color: COLORS.muted, fontSize: 9, marginTop: 3 }, orderActions: { maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 7, flexWrap: "wrap" }, statusPill: { flexShrink: 0, minHeight: 34, borderRadius: 999, backgroundColor: "#E3EBE6", paddingHorizontal: 12, paddingVertical: 7, alignItems: "center", justifyContent: "center" }, statusPillReady: { minWidth: 132 }, statusText: { flexShrink: 0, color: COLORS.ink, fontSize: 8.5, fontWeight: "900" }, primaryButton: { flexShrink: 0, borderRadius: 10, backgroundColor: COLORS.ink, paddingHorizontal: 12, paddingVertical: 9 }, primaryButtonText: { color: COLORS.card, fontSize: 8.5, fontWeight: "900" }, rejectButton: { flexShrink: 0, paddingHorizontal: 8, paddingVertical: 8 }, rejectText: { color: COLORS.danger, fontSize: 8.5, fontWeight: "900" },
