@@ -61,7 +61,6 @@ const configureAndroidChannels = async () => {
       name: "Order updates",
       description: "Live order and payment status updates.",
       importance: Notifications.AndroidImportance.HIGH,
-      sound: "default",
       vibrationPattern: [0, 250, 180, 250],
       lightColor: "#E2B52F",
     }),
@@ -69,14 +68,12 @@ const configureAndroidChannels = async () => {
       name: "KopiPow news",
       description: "New drinks, promotions, and KopiPow announcements.",
       importance: Notifications.AndroidImportance.DEFAULT,
-      sound: "default",
       lightColor: "#E2B52F",
     }),
     Notifications.setNotificationChannelAsync("general", {
       name: "General",
       description: "Important account and service messages.",
       importance: Notifications.AndroidImportance.DEFAULT,
-      sound: "default",
       lightColor: "#E2B52F",
     }),
   ]);
