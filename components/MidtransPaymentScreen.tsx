@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   headerTitle: { color: COLORS.ink, fontSize: 16, fontWeight: "900" },
   headerSubtitle: { color: COLORS.muted, fontSize: 11, marginTop: 2 },
   webView: { flex: 1, backgroundColor: COLORS.white },
-  webLoading: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.white },
+  webLoading: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.white },
   statusBar: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 16, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: "#DDE3DF" },
   statusText: { flex: 1, color: COLORS.green, fontSize: 11, fontWeight: "700" },
   errorStatusText: { color: "#963A31" },

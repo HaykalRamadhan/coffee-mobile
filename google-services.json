@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "792597628569",
+    "project_id": "kopipow",
+    "storage_bucket": "kopipow.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:792597628569:android:14b710f247a1d973edda08",
+        "android_client_info": {
+          "package_name": "com.kopipow.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZW1GAbfnY14lDl66PH-QdoWum_UaUpt0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

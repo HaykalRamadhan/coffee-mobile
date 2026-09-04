@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { createClient, processLock, type Session } from "@supabase/supabase-js";
+import { createClient, type Session } from "@supabase/supabase-js";
 import * as ExpoLinking from "expo-linking";
 import { Platform } from "react-native";
 import "react-native-url-polyfill/auto";
@@ -35,7 +35,6 @@ export const supabaseAuth = isSupabaseConfigured
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
-      lock: processLock,
     },
   })
   : null;
