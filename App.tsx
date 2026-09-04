@@ -66,6 +66,7 @@ import {
   listenForNotificationResponses,
   listenForPushTokenChanges,
   registerPushNotifications,
+  type KopiPowDevicePushToken,
 } from "./lib/notifications";
 import { paymentGateway } from "./lib/payments";
 import { loadHostedProductCatalog } from "./lib/productImages";
@@ -683,15 +684,20 @@ function KopiPowApp() {
     if (!session?.user.id || !networkAvailable) return;
 
     let cancelled = false;
-    const register = async () => {
-      const result = await registerPushNotifications();
+    let stopListeningForTokenChanges: () => void = () => undefined;
+    const register = async (devicePushToken?: KopiPowDevicePushToken) => {
+      const result = await registerPushNotifications(devicePushToken);
       if (!cancelled && result.status === "error") {
         console.warn(`[notifications] ${result.message ?? "Device registration failed."}`);
       }
     };
 
-    void register();
-    const stopListeningForTokenChanges = listenForPushTokenChanges(() => { void register(); });
+    void register().finally(() => {
+      if (cancelled) return;
+      stopListeningForTokenChanges = listenForPushTokenChanges((devicePushToken) => {
+        void register(devicePushToken);
+      });
+    });
     return () => {
       cancelled = true;
       stopListeningForTokenChanges();
