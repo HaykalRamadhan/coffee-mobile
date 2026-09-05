@@ -188,6 +188,8 @@ function KopiPowApp() {
     isAuthenticated,
     session,
     signOut,
+    updateDisplayName,
+    updatePassword,
   } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -1007,13 +1009,21 @@ function KopiPowApp() {
   if (isAuthenticated && (access.role === "staff" || access.role === "admin")) {
     return (
       <TypographyScaleContext.Provider value={typographyScale}>
-        <OperationsWorkspace
-          role={access.role}
-          displayName={appUser.displayName}
-          branchId={access.branchId}
-          openOrdersSignal={operationsOrdersSignal}
-          onSignOut={signOut}
-        />
+        <>
+          <OperationsWorkspace
+            role={access.role}
+            displayName={appUser.displayName}
+            email={appUser.email}
+            phone={session?.user.phone ?? null}
+            branchId={access.branchId}
+            networkAvailable={networkAvailable}
+            openOrdersSignal={operationsOrdersSignal}
+            onSignOut={signOut}
+            onUpdateDisplayName={updateDisplayName}
+            onUpdatePassword={updatePassword}
+          />
+          <AppUpdateManager blocked={false} networkAvailable={networkAvailable} />
+        </>
       </TypographyScaleContext.Provider>
     );
   }
